@@ -21,6 +21,7 @@ straight from a web link.
 1. Create a free GitHub account if you don't have one (https://github.com).
 2. Create a new repository (e.g. `inventory-app`), and upload all the files in this folder to it
    (GitHub's web "upload files" button works fine — no command line needed).
+   
 
 ### Step 3 — Deploy it for free on Vercel
 1. Go to https://vercel.com and sign up (use "Continue with GitHub").
