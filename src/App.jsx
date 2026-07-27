@@ -181,7 +181,7 @@ function ItemForm({ accent, name, onAdd, onClose }) {
         </div>
         <input placeholder="Current qty" type="number" value={qty} onChange={(e) => setQty(e.target.value)} className={inputCls} />
         <select value={unit} onChange={(e) => setUnit(e.target.value)} className={inputCls}>
-          <option>kg</option><option>L</option><option>units</option><option>drums</option><option>cartons</option>
+          <option>g</option><option>kg</option><option>ml</option><option>L</option><option>units</option><option>drums</option><option>cartons</option>
         </select>
         <div className="col-span-2"><input placeholder="Reorder below" type="number" value={threshold} onChange={(e) => setThreshold(e.target.value)} className={inputCls} /></div>
 
@@ -222,32 +222,46 @@ function MovementRow({ h, showItem }) {
 
 function ItemCard({ item, accent, name, onUpdate, onDelete }) {
   const [open, setOpen] = useState(false);
-  const [showReorder, setShowReorder] = useState(false);
-  const [reorderQty, setReorderQty] = useState("");
+  const [activeAction, setActiveAction] = useState(null); // "in" | "out" | "reorder" | null
+  const [moveQty, setMoveQty] = useState("");
   const low = item.qty <= item.threshold;
   const pct = item.threshold > 0 ? Math.min(100, (item.qty / (item.threshold * 2)) * 100) : 100;
 
-  const move = (type, delta, note) => {
-    const qty = Math.abs(delta);
-    const nextQty = type === "out" ? Math.max(0, item.qty - qty) : item.qty + qty;
+  const move = (type) => {
+    const q = Number(moveQty);
+    if (!q || q <= 0) return;
+    const nextQty = type === "out" ? Math.max(0, item.qty - q) : item.qty + q;
     onUpdate({
       ...item,
       qty: nextQty,
-      history: [{ id: uid(), type, qty, date: new Date().toISOString(), note, by: name }, ...item.history],
+      history: [{ id: uid(), type, qty: q, date: new Date().toISOString(), note: type === "in" ? "Stock in" : "Stock out", by: name }, ...item.history],
     });
+    setMoveQty("");
+    setActiveAction(null);
   };
 
   const logReorder = () => {
-    if (!reorderQty) return;
+    const q = Number(moveQty);
+    if (!q || q <= 0) return;
     onUpdate({
       ...item,
       history: [
-        { id: uid(), type: "reorder", qty: Number(reorderQty), date: new Date().toISOString(), note: `Ordered from ${item.supplier?.name || "supplier"}`, by: name },
+        { id: uid(), type: "reorder", qty: q, date: new Date().toISOString(), note: `Ordered from ${item.supplier?.name || "supplier"}`, by: name },
         ...item.history,
       ],
     });
-    setReorderQty("");
-    setShowReorder(false);
+    setMoveQty("");
+    setActiveAction(null);
+  };
+
+  const toggleAction = (action) => {
+    if (activeAction === action) {
+      setActiveAction(null);
+      setMoveQty("");
+    } else {
+      setActiveAction(action);
+      setMoveQty("");
+    }
   };
 
   return (
@@ -283,22 +297,41 @@ function ItemCard({ item, accent, name, onUpdate, onDelete }) {
           )}
 
           <div className="flex gap-2 mt-3">
-            <button onClick={() => move("in", 1, "Stock in")} className="flex-1 flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-medium" style={{ background: "#6FCF9720", color: "#6FCF97" }}>
+            <button onClick={() => toggleAction("in")} className="flex-1 flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-medium" style={{ background: activeAction === "in" ? "#6FCF9740" : "#6FCF9720", color: "#6FCF97" }}>
               <ArrowDownCircle size={13} /> Stock in
             </button>
-            <button onClick={() => move("out", 1, "Stock out")} className="flex-1 flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-medium" style={{ background: "#E2574C20", color: "#E2574C" }}>
+            <button onClick={() => toggleAction("out")} className="flex-1 flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-medium" style={{ background: activeAction === "out" ? "#E2574C40" : "#E2574C20", color: "#E2574C" }}>
               <ArrowUpCircle size={13} /> Stock out
             </button>
-            <button onClick={() => setShowReorder(!showReorder)} className="flex-1 flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-medium" style={{ background: "#4FA8A020", color: "#4FA8A0" }}>
+            <button onClick={() => toggleAction("reorder")} className="flex-1 flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-medium" style={{ background: activeAction === "reorder" ? "#4FA8A040" : "#4FA8A020", color: "#4FA8A0" }}>
               <RotateCcw size={13} /> Reorder
             </button>
           </div>
 
-          {showReorder && (
+          {activeAction && (
             <div className="flex gap-2 mt-2">
-              <input placeholder={`Qty ordered (${item.unit})`} type="number" value={reorderQty}
-                onChange={(e) => setReorderQty(e.target.value)} className={inputCls} />
-              <button onClick={logReorder} className="px-3 rounded-lg text-xs font-semibold shrink-0" style={{ background: accent, color: "#15181e" }}>Log</button>
+              <input
+                autoFocus
+                placeholder={`Qty in ${item.unit}`}
+                type="number"
+                inputMode="decimal"
+                value={moveQty}
+                onChange={(e) => setMoveQty(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    if (activeAction === "reorder") logReorder();
+                    else move(activeAction);
+                  }
+                }}
+                className={inputCls}
+              />
+              <button
+                onClick={() => (activeAction === "reorder" ? logReorder() : move(activeAction))}
+                className="px-4 rounded-lg text-xs font-semibold shrink-0"
+                style={{ background: accent, color: "#15181e" }}
+              >
+                Confirm
+              </button>
             </div>
           )}
 
