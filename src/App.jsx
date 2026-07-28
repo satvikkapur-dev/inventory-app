@@ -187,7 +187,7 @@ function PinGate({ accent, onLogin }) {
   return (
     <div className="min-h-screen w-full flex items-center justify-center px-6" style={{ background: "#15181e", fontFamily: "'Inter', system-ui, sans-serif" }}>
       <div className="w-full max-w-xs text-center">
-        <img src="/icon-512.png" alt="Logo" className="w-14 h-14 mx-auto mb-3 rounded-xl" />
+        <img src="/icon-512.png?v=2" alt="Logo" className="w-14 h-14 mx-auto mb-3 rounded-xl" />
         <h1 style={{ fontFamily: "'Space Grotesk', sans-serif" }} className="text-lg font-bold text-zinc-100 mb-1">Enter your PIN</h1>
         <p className="text-xs text-zinc-500 mb-4">Your PIN identifies you — every entry you make gets tagged with your name automatically.</p>
         <input
