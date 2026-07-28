@@ -4,7 +4,7 @@ import { db } from "./firebase";
 import {
   Plus, Package, AlertTriangle, Trash2, X, ChevronDown, ChevronUp,
   Truck, Clock, ArrowDownCircle, ArrowUpCircle, RotateCcw, Gauge, User, History as HistoryIcon,
-  Shield, LogIn, Lock, Pencil, Factory, Layers,
+  Shield, LogIn, Lock, Pencil, Factory, Layers, UploadCloud,
 } from "lucide-react";
 
 const BRANDS = {
@@ -506,6 +506,69 @@ function ItemCard({ item, accent, name, isBoss, onUpdate, onDelete }) {
   );
 }
 
+function BulkImportForm({ accent, name, onImport, onClose }) {
+  const [text, setText] = useState("");
+  const [result, setResult] = useState(null);
+
+  const submit = () => {
+    const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+    const newItems = [];
+    let skipped = 0;
+
+    for (const line of lines) {
+      const parts = line.split(",").map((p) => p.trim());
+      if (parts.length < 5) { skipped++; continue; }
+      const [nm, category, qtyStr, unit, thresholdStr] = parts;
+      const qty = Number(qtyStr);
+      const threshold = Number(thresholdStr);
+      if (!nm || !CATEGORIES.includes(category) || isNaN(qty) || isNaN(threshold)) { skipped++; continue; }
+      newItems.push({
+        id: uid(),
+        name: nm,
+        category,
+        qty,
+        unit: unit || "kg",
+        threshold,
+        supplier: { name: "", contact: "", leadTime: null },
+        history: [
+          { id: uid(), type: "in", qty, date: new Date().toISOString(), note: "Bulk import", by: name },
+        ],
+      });
+    }
+
+    if (newItems.length > 0) onImport(newItems);
+    setResult({ added: newItems.length, skipped });
+  };
+
+  return (
+    <div className="rounded-xl p-4 mb-3" style={{ background: "#20242c", border: "1px solid #ffffff14" }}>
+      <div className="flex justify-between items-center mb-3">
+        <span className="text-sm font-semibold tracking-wide" style={{ color: accent }}>BULK IMPORT ITEMS</span>
+        <button onClick={onClose} aria-label="Close form"><X size={16} className="text-zinc-500" /></button>
+      </div>
+      <p className="text-[10px] text-zinc-500 mb-2">
+        One item per line: <span className="text-zinc-400">Name, Category, Qty, Unit, Reorder threshold</span><br />
+        Category must be exactly: Raw material / Packaging / Finished good
+      </p>
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder={"SLURRY, Raw material, 3026, kg, 700\nUREA, Raw material, 2168, kg, 700"}
+        rows={8}
+        className={inputCls + " font-mono text-xs resize-none"}
+      />
+      {result && (
+        <p className="text-xs mt-2" style={{ color: result.added > 0 ? "#6FCF97" : "#E2574C" }}>
+          Added {result.added} item{result.added !== 1 ? "s" : ""}{result.skipped > 0 ? `, skipped ${result.skipped} (bad format)` : ""}.
+        </p>
+      )}
+      <button onClick={submit} className="mt-3 w-full rounded-lg py-2 text-sm font-semibold" style={{ background: accent, color: "#15181e" }}>
+        Import items
+      </button>
+    </div>
+  );
+}
+
 function ProductionForm({ accent, name, rawMaterials, onSubmit, onClose }) {
   const [productName, setProductName] = useState("");
   const [batchNumber, setBatchNumber] = useState("");
@@ -658,6 +721,7 @@ export default function App() {
   const [brand, setBrand] = useState("urbnfettch");
   const [tab, setTab] = useState("items");
   const [showForm, setShowForm] = useState(false);
+  const [showBulkImport, setShowBulkImport] = useState(false);
   const [showProdForm, setShowProdForm] = useState(false);
   const [filter, setFilter] = useState("All");
   const { items, save, loading } = useInventory(brand);
@@ -689,6 +753,7 @@ export default function App() {
     save(items.filter((i) => i.id !== id));
   };
   const addItem = (item) => save([item, ...items]);
+  const bulkAddItems = (newItems) => save([...newItems, ...items]);
 
   const logProduction = (batch) => {
     let nextItems = items.map((item) => {
@@ -811,21 +876,31 @@ export default function App() {
       </div>
 
       {tab === "items" && (
-        <div className="flex gap-1.5 px-4 mt-3 overflow-x-auto">
-          {["All", "Low stock", ...CATEGORIES].map((f) => (
+        <div className="flex items-center justify-between gap-2 px-4 mt-3">
+          <div className="flex gap-1.5 overflow-x-auto">
+            {["All", "Low stock", ...CATEGORIES].map((f) => (
+              <button
+                key={f}
+                onClick={() => setFilter(f)}
+                className="px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors"
+                style={{
+                  background: filter === f ? meta.accent : "transparent",
+                  color: filter === f ? "#15181e" : "#a1a1aa",
+                  border: filter === f ? "none" : "1px solid #ffffff14",
+                }}
+              >
+                {f}
+              </button>
+            ))}
+          </div>
+          {isBoss && (
             <button
-              key={f}
-              onClick={() => setFilter(f)}
-              className="px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors"
-              style={{
-                background: filter === f ? meta.accent : "transparent",
-                color: filter === f ? "#15181e" : "#a1a1aa",
-                border: filter === f ? "none" : "1px solid #ffffff14",
-              }}
+              onClick={() => setShowBulkImport(!showBulkImport)}
+              className="flex items-center gap-1 text-[11px] shrink-0 text-zinc-500"
             >
-              {f}
+              <UploadCloud size={13} /> Bulk import
             </button>
-          ))}
+          )}
         </div>
       )}
 
@@ -834,6 +909,14 @@ export default function App() {
           <div className="text-center text-zinc-500 text-sm py-10">Loading…</div>
         ) : tab === "items" ? (
           <>
+            {showBulkImport && (
+              <BulkImportForm
+                accent={meta.accent}
+                name={session.name}
+                onClose={() => setShowBulkImport(false)}
+                onImport={bulkAddItems}
+              />
+            )}
             {showForm && <ItemForm accent={meta.accent} name={session.name} onClose={() => setShowForm(false)} onAdd={addItem} />}
             {visible.length === 0 && !showForm && (
               <div className="text-center py-14">
