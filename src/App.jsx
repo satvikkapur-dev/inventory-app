@@ -4,7 +4,7 @@ import { db } from "./firebase";
 import {
   Plus, Package, AlertTriangle, Trash2, X, ChevronDown, ChevronUp,
   Truck, Clock, ArrowDownCircle, ArrowUpCircle, RotateCcw, Gauge, User, History as HistoryIcon,
-  Shield, LogIn, Lock, Pencil,
+  Shield, LogIn, Lock, Pencil, Factory, Layers,
 } from "lucide-react";
 
 const BRANDS = {
@@ -23,6 +23,7 @@ const BRANDS = {
 };
 
 const CATEGORIES = ["Raw material", "Packaging", "Finished good"];
+const UNITS = ["g", "kg", "ml", "L", "units", "drums", "cartons"];
 
 // Add/edit your team here. role "boss" can delete/edit items, "staff" cannot.
 const USERS = [
@@ -40,6 +41,10 @@ function fmtDate(iso) {
   const d = new Date(iso);
   return d.toLocaleDateString(undefined, { day: "numeric", month: "short" }) + " · " +
     d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
+
+function todayStr() {
+  return new Date().toISOString().slice(0, 10);
 }
 
 function useInventory(brand) {
@@ -73,6 +78,29 @@ function useInventory(brand) {
   };
 
   return { items, save, loading };
+}
+
+function useProduction(brand) {
+  const [batches, setBatches] = useState([]);
+
+  useEffect(() => {
+    const ref = doc(db, "production", brand);
+    const unsub = onSnapshot(ref, (snap) => {
+      setBatches(snap.exists() ? snap.data().batches || [] : []);
+    });
+    return () => unsub();
+  }, [brand]);
+
+  const save = async (next) => {
+    setBatches(next);
+    try {
+      await setDoc(doc(db, "production", brand), { batches: next });
+    } catch (e) {
+      console.error("Failed to save production log", e);
+    }
+  };
+
+  return { batches, save };
 }
 
 function useLoginLog() {
@@ -232,7 +260,7 @@ function ItemForm({ accent, name, onAdd, onClose }) {
         </div>
         <input placeholder="Current qty" type="number" value={qty} onChange={(e) => setQty(e.target.value)} className={inputCls} />
         <select value={unit} onChange={(e) => setUnit(e.target.value)} className={inputCls}>
-          <option>g</option><option>kg</option><option>ml</option><option>L</option><option>units</option><option>drums</option><option>cartons</option>
+          {UNITS.map((u) => <option key={u}>{u}</option>)}
         </select>
         <div className="col-span-2"><input placeholder="Reorder below" type="number" value={threshold} onChange={(e) => setThreshold(e.target.value)} className={inputCls} /></div>
 
@@ -289,7 +317,7 @@ function EditItemForm({ accent, item, onSave, onClose }) {
           </select>
         </div>
         <select value={unit} onChange={(e) => setUnit(e.target.value)} className={inputCls}>
-          <option>g</option><option>kg</option><option>ml</option><option>L</option><option>units</option><option>drums</option><option>cartons</option>
+          {UNITS.map((u) => <option key={u}>{u}</option>)}
         </select>
         <input placeholder="Reorder below" type="number" value={threshold} onChange={(e) => setThreshold(e.target.value)} className={inputCls} />
 
@@ -478,12 +506,162 @@ function ItemCard({ item, accent, name, isBoss, onUpdate, onDelete }) {
   );
 }
 
+function ProductionForm({ accent, name, rawMaterials, onSubmit, onClose }) {
+  const [productName, setProductName] = useState("");
+  const [batchNumber, setBatchNumber] = useState("");
+  const [date, setDate] = useState(todayStr());
+  const [machineNumber, setMachineNumber] = useState("");
+  const [outputQty, setOutputQty] = useState("");
+  const [outputUnit, setOutputUnit] = useState("kg");
+  const [rows, setRows] = useState([{ id: uid(), itemId: "", qty: "" }]);
+
+  const addRow = () => setRows([...rows, { id: uid(), itemId: "", qty: "" }]);
+  const removeRow = (id) => setRows(rows.filter((r) => r.id !== id));
+  const updateRow = (id, patch) => setRows(rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+
+  const submit = () => {
+    if (!productName.trim() || !batchNumber.trim() || !outputQty) return;
+    const materials = rows
+      .filter((r) => r.itemId && r.qty)
+      .map((r) => {
+        const item = rawMaterials.find((m) => m.id === r.itemId);
+        return item ? { itemId: item.id, itemName: item.name, qty: Number(r.qty), unit: item.unit } : null;
+      })
+      .filter(Boolean);
+    if (materials.length === 0) return;
+
+    onSubmit({
+      id: uid(),
+      productName: productName.trim(),
+      batchNumber: batchNumber.trim(),
+      date,
+      machineNumber: machineNumber.trim(),
+      outputQty: Number(outputQty),
+      outputUnit,
+      materials,
+      by: name,
+      createdAt: new Date().toISOString(),
+    });
+    onClose();
+  };
+
+  return (
+    <div className="rounded-xl p-4 mb-3" style={{ background: "#20242c", border: "1px solid #ffffff14" }}>
+      <div className="flex justify-between items-center mb-3">
+        <span className="text-sm font-semibold tracking-wide" style={{ color: accent }}>NEW PRODUCTION BATCH</span>
+        <button onClick={onClose} aria-label="Close form"><X size={16} className="text-zinc-500" /></button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div className="col-span-2"><input placeholder="Product name" value={productName} onChange={(e) => setProductName(e.target.value)} className={inputCls} /></div>
+        <input placeholder="Batch number" value={batchNumber} onChange={(e) => setBatchNumber(e.target.value)} className={inputCls} />
+        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} />
+        <input placeholder="Machine number" value={machineNumber} onChange={(e) => setMachineNumber(e.target.value)} className={inputCls} />
+        <div className="flex gap-2">
+          <input placeholder="Output qty" type="number" value={outputQty} onChange={(e) => setOutputQty(e.target.value)} className={inputCls} />
+          <select value={outputUnit} onChange={(e) => setOutputUnit(e.target.value)} className={inputCls} style={{ maxWidth: "5.5rem" }}>
+            {UNITS.map((u) => <option key={u}>{u}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div className="mt-3">
+        <div className="text-[10px] uppercase tracking-wide text-zinc-500 mb-1.5">Raw materials used</div>
+        {rawMaterials.length === 0 && (
+          <p className="text-xs text-zinc-600 mb-2">No raw materials tracked yet for this brand — add some in the Items tab first.</p>
+        )}
+        <div className="space-y-2">
+          {rows.map((row) => {
+            const selected = rawMaterials.find((m) => m.id === row.itemId);
+            return (
+              <div key={row.id} className="flex gap-2">
+                <select
+                  value={row.itemId}
+                  onChange={(e) => updateRow(row.id, { itemId: e.target.value })}
+                  className={inputCls + " flex-1"}
+                >
+                  <option value="">Select material…</option>
+                  {rawMaterials.map((m) => (
+                    <option key={m.id} value={m.id}>{m.name} ({m.qty}{m.unit} available)</option>
+                  ))}
+                </select>
+                <input
+                  placeholder={selected ? selected.unit : "qty"}
+                  type="number"
+                  value={row.qty}
+                  onChange={(e) => updateRow(row.id, { qty: e.target.value })}
+                  className={inputCls}
+                  style={{ maxWidth: "5.5rem" }}
+                />
+                {rows.length > 1 && (
+                  <button onClick={() => removeRow(row.id)} aria-label="Remove row" className="shrink-0">
+                    <X size={16} className="text-zinc-600" />
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        <button onClick={addRow} className="mt-2 text-xs flex items-center gap-1" style={{ color: accent }}>
+          <Plus size={12} /> Add material
+        </button>
+      </div>
+
+      <button onClick={submit} className="mt-4 w-full rounded-lg py-2 text-sm font-semibold" style={{ background: accent, color: "#15181e" }}>
+        Log production &amp; update stock
+      </button>
+    </div>
+  );
+}
+
+function ProductionCard({ batch, accent, isBoss, onDelete }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded-xl overflow-hidden" style={{ background: "#1c1f26", border: "1px solid #ffffff0f" }}>
+      <button className="w-full px-3.5 py-3 flex items-center gap-3 text-left" onClick={() => setOpen(!open)}>
+        <Factory size={18} style={{ color: accent }} className="shrink-0" />
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium text-zinc-100 truncate">{batch.productName}</div>
+          <div className="text-xs text-zinc-500 mt-0.5 truncate">
+            Batch {batch.batchNumber} · {batch.date}{batch.machineNumber ? ` · Machine ${batch.machineNumber}` : ""}
+          </div>
+        </div>
+        <span className="mono-font text-xs shrink-0 text-zinc-200">+{batch.outputQty}{batch.outputUnit}</span>
+        {open ? <ChevronUp size={16} className="text-zinc-600" /> : <ChevronDown size={16} className="text-zinc-600" />}
+      </button>
+      {open && (
+        <div className="px-3.5 pb-3.5" style={{ borderTop: "1px solid #ffffff0f" }}>
+          <div className="mt-3 text-[10px] uppercase tracking-wide text-zinc-500 mb-1">Materials consumed</div>
+          <div className="space-y-1">
+            {batch.materials.map((m, i) => (
+              <div key={i} className="flex items-center justify-between text-xs">
+                <span className="text-zinc-400">{m.itemName}</span>
+                <span className="mono-font" style={{ color: "#E2574C" }}>−{m.qty}{m.unit}</span>
+              </div>
+            ))}
+          </div>
+          <div className="text-[10px] text-zinc-600 flex items-center gap-1 mt-3">
+            <User size={9} /> Logged by {batch.by} · {fmtDate(batch.createdAt)}
+          </div>
+          {isBoss && (
+            <button onClick={() => onDelete(batch.id)} className="mt-3 flex items-center gap-1.5 text-xs text-zinc-600">
+              <Trash2 size={12} /> Remove log entry (stock changes stay as-is)
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   const [brand, setBrand] = useState("urbnfettch");
   const [tab, setTab] = useState("items");
   const [showForm, setShowForm] = useState(false);
+  const [showProdForm, setShowProdForm] = useState(false);
   const [filter, setFilter] = useState("All");
   const { items, save, loading } = useInventory(brand);
+  const { batches, save: saveBatches } = useProduction(brand);
   const { session, save: saveSession } = useSession();
   const { logins, record } = useLoginLog();
   const meta = BRANDS[brand];
@@ -497,6 +675,7 @@ export default function App() {
 
   const lowStock = items.filter((i) => i.qty <= i.threshold);
   const visible = filter === "All" ? items : filter === "Low stock" ? lowStock : items.filter((i) => i.category === filter);
+  const rawMaterials = items.filter((i) => i.category === "Raw material");
 
   const allHistory = useMemo(() => {
     const rows = [];
@@ -510,6 +689,64 @@ export default function App() {
     save(items.filter((i) => i.id !== id));
   };
   const addItem = (item) => save([item, ...items]);
+
+  const logProduction = (batch) => {
+    let nextItems = items.map((item) => {
+      const used = batch.materials.find((m) => m.itemId === item.id);
+      if (!used) return item;
+      return {
+        ...item,
+        qty: Math.max(0, item.qty - used.qty),
+        history: [
+          { id: uid(), type: "out", qty: used.qty, date: new Date().toISOString(), note: `Used in batch ${batch.batchNumber} (${batch.productName})`, by: batch.by },
+          ...item.history,
+        ],
+      };
+    });
+
+    const existingFG = nextItems.find(
+      (i) => i.category === "Finished good" && i.name.trim().toLowerCase() === batch.productName.trim().toLowerCase()
+    );
+
+    if (existingFG) {
+      nextItems = nextItems.map((i) =>
+        i.id === existingFG.id
+          ? {
+              ...i,
+              qty: i.qty + batch.outputQty,
+              history: [
+                { id: uid(), type: "in", qty: batch.outputQty, date: new Date().toISOString(), note: `Produced — batch ${batch.batchNumber}`, by: batch.by },
+                ...i.history,
+              ],
+            }
+          : i
+      );
+    } else {
+      nextItems = [
+        {
+          id: uid(),
+          name: batch.productName,
+          category: "Finished good",
+          qty: batch.outputQty,
+          unit: batch.outputUnit,
+          threshold: 0,
+          supplier: { name: "", contact: "", leadTime: null },
+          history: [
+            { id: uid(), type: "in", qty: batch.outputQty, date: new Date().toISOString(), note: `Produced — batch ${batch.batchNumber}`, by: batch.by },
+          ],
+        },
+        ...nextItems,
+      ];
+    }
+
+    save(nextItems);
+    saveBatches([batch, ...batches]);
+  };
+
+  const deleteBatch = (id) => {
+    if (!isBoss) return;
+    saveBatches(batches.filter((b) => b.id !== id));
+  };
 
   if (!session) return <PinGate accent={meta.accent} onLogin={handleLogin} />;
 
@@ -558,6 +795,7 @@ export default function App() {
       <div className="flex gap-1 px-4 mt-4 overflow-x-auto">
         {[
           { key: "items", label: "Items", icon: Package },
+          { key: "production", label: "Production", icon: Factory },
           { key: "history", label: "History", icon: HistoryIcon },
           ...(isBoss ? [{ key: "logins", label: "Logins", icon: Shield }] : []),
         ].map(({ key, label, icon: Icon }) => (
@@ -612,6 +850,30 @@ export default function App() {
               ))}
             </div>
           </>
+        ) : tab === "production" ? (
+          <>
+            {showProdForm && (
+              <ProductionForm
+                accent={meta.accent}
+                name={session.name}
+                rawMaterials={rawMaterials}
+                onClose={() => setShowProdForm(false)}
+                onSubmit={logProduction}
+              />
+            )}
+            {batches.length === 0 && !showProdForm && (
+              <div className="text-center py-14">
+                <Factory size={28} className="mx-auto text-zinc-700 mb-2" />
+                <p className="text-sm text-zinc-500">No production logged yet for {meta.label}.</p>
+                <p className="text-xs text-zinc-600 mt-1">Tap + to log your first batch.</p>
+              </div>
+            )}
+            <div className="space-y-2">
+              {batches.map((batch) => (
+                <ProductionCard key={batch.id} batch={batch} accent={meta.accent} isBoss={isBoss} onDelete={deleteBatch} />
+              ))}
+            </div>
+          </>
         ) : tab === "history" ? (
           <div className="rounded-xl px-3.5 py-2" style={{ background: "#1c1f26", border: "1px solid #ffffff0f" }}>
             {allHistory.length === 0 ? (
@@ -657,6 +919,17 @@ export default function App() {
           className="fixed bottom-6 right-6 w-12 h-12 rounded-full flex items-center justify-center shadow-lg"
           style={{ background: meta.accent }}
           aria-label="Add new item"
+        >
+          <Plus size={22} color="#15181e" strokeWidth={2.5} />
+        </button>
+      )}
+
+      {tab === "production" && (
+        <button
+          onClick={() => setShowProdForm(true)}
+          className="fixed bottom-6 right-6 w-12 h-12 rounded-full flex items-center justify-center shadow-lg"
+          style={{ background: meta.accent }}
+          aria-label="Log new production batch"
         >
           <Plus size={22} color="#15181e" strokeWidth={2.5} />
         </button>
