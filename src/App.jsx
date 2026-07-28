@@ -3,22 +3,25 @@ import { doc, onSnapshot, setDoc } from "firebase/firestore";
 import { db } from "./firebase";
 import {
   Plus, Package, AlertTriangle, Trash2, X, ChevronDown, ChevronUp,
-  Truck, Clock, ArrowDownCircle, ArrowUpCircle, RotateCcw, Gauge, User, History as HistoryIcon,
-  Shield, LogIn, Lock, Pencil, Factory, Layers, UploadCloud,
+  Truck, Clock, ArrowDownCircle, ArrowUpCircle, RotateCcw, User, History as HistoryIcon,
+  Shield, LogIn, Pencil, Factory, UploadCloud,
 } from "lucide-react";
+
+const DARK_GREEN = "#155830";
+const LIGHT_GREEN = "#59A249";
 
 const BRANDS = {
   urbnfettch: {
-    label: "UrbnFettch",
+    label: "Rubber Div",
     sub: "Anti-tack solutions · Rubber industry",
-    accent: "#155830",
-    accentDim: "#15583033",
+    accent: DARK_GREEN,
+    accentDim: "#15583022",
   },
   homecare: {
     label: "Homecare",
     sub: "Handwash · Dishwash · Tile cleaner",
-    accent: "#59A249",
-    accentDim: "#59A24933",
+    accent: LIGHT_GREEN,
+    accentDim: "#59A24922",
   },
 };
 
@@ -45,6 +48,14 @@ function fmtDate(iso) {
 
 function todayStr() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function Wordmark({ size = "text-lg" }) {
+  return (
+    <span className={`font-bold tracking-tight ${size}`} style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+      <span style={{ color: DARK_GREEN }}>URBN</span><span style={{ color: LIGHT_GREEN }}>FETTCH</span>
+    </span>
+  );
 }
 
 function useInventory(brand) {
@@ -157,7 +168,7 @@ function GaugeDot({ pct, accent, size = 36 }) {
   const dash = Math.max(0, Math.min(100, pct)) / 100 * c;
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="shrink-0">
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#ffffff14" strokeWidth="4" />
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#00000014" strokeWidth="4" />
       <circle
         cx={size / 2} cy={size / 2} r={r} fill="none" stroke={accent} strokeWidth="4"
         strokeDasharray={`${dash} ${c - dash}`} strokeLinecap="round"
@@ -168,9 +179,9 @@ function GaugeDot({ pct, accent, size = 36 }) {
 }
 
 const inputCls =
-  "w-full bg-[#15181e] text-sm text-zinc-100 rounded-lg px-3 py-2 outline-none border border-transparent focus:border-zinc-600 placeholder:text-zinc-500";
+  "w-full bg-white text-sm text-zinc-900 rounded-lg px-3 py-2 outline-none border border-zinc-200 focus:border-zinc-400 placeholder:text-zinc-400";
 
-function PinGate({ accent, onLogin }) {
+function PinGate({ onLogin }) {
   const [pin, setPin] = useState("");
   const [error, setError] = useState("");
 
@@ -185,10 +196,10 @@ function PinGate({ accent, onLogin }) {
   };
 
   return (
-    <div className="min-h-screen w-full flex items-center justify-center px-6" style={{ background: "#15181e", fontFamily: "'Inter', system-ui, sans-serif" }}>
+    <div className="min-h-screen w-full flex items-center justify-center px-6" style={{ background: "#ffffff", fontFamily: "'Inter', system-ui, sans-serif" }}>
       <div className="w-full max-w-xs text-center">
-        <img src="/icon-512.png?v=2" alt="Logo" className="w-14 h-14 mx-auto mb-3 rounded-xl" />
-        <h1 style={{ fontFamily: "'Space Grotesk', sans-serif" }} className="text-lg font-bold text-zinc-100 mb-1">Enter your PIN</h1>
+        <div className="mb-4"><Wordmark size="text-2xl" /></div>
+        <h1 style={{ fontFamily: "'Space Grotesk', sans-serif" }} className="text-lg font-bold text-zinc-900 mb-1">Enter your PIN</h1>
         <p className="text-xs text-zinc-500 mb-4">Your PIN identifies you — every entry you make gets tagged with your name automatically.</p>
         <input
           autoFocus
@@ -205,7 +216,7 @@ function PinGate({ accent, onLogin }) {
         <button
           onClick={submit}
           className="mt-3 w-full rounded-lg py-2 text-sm font-semibold flex items-center justify-center gap-1.5"
-          style={{ background: accent, color: "#15181e" }}
+          style={{ background: DARK_GREEN, color: "#ffffff" }}
         >
           <LogIn size={14} /> Continue
         </button>
@@ -246,10 +257,10 @@ function ItemForm({ accent, name, onAdd, onClose }) {
   };
 
   return (
-    <div className="rounded-xl p-4 mb-3" style={{ background: "#20242c", border: "1px solid #ffffff14" }}>
+    <div className="rounded-xl p-4 mb-3" style={{ background: "#F3F5F4", border: "1px solid #00000012" }}>
       <div className="flex justify-between items-center mb-3">
         <span className="text-sm font-semibold tracking-wide" style={{ color: accent }}>NEW ITEM</span>
-        <button onClick={onClose} aria-label="Close form"><X size={16} className="text-zinc-500" /></button>
+        <button onClick={onClose} aria-label="Close form"><X size={16} className="text-zinc-400" /></button>
       </div>
       <div className="grid grid-cols-2 gap-2">
         <div className="col-span-2"><input placeholder="Item name" value={nm} onChange={(e) => setNm(e.target.value)} className={inputCls} /></div>
@@ -264,12 +275,12 @@ function ItemForm({ accent, name, onAdd, onClose }) {
         </select>
         <div className="col-span-2"><input placeholder="Reorder below" type="number" value={threshold} onChange={(e) => setThreshold(e.target.value)} className={inputCls} /></div>
 
-        <div className="col-span-2 text-[10px] uppercase tracking-wide text-zinc-500 mb-1 mt-1">Supplier (optional)</div>
+        <div className="col-span-2 text-[10px] uppercase tracking-wide text-zinc-400 mb-1 mt-1">Supplier (optional)</div>
         <div className="col-span-2"><input placeholder="Supplier name" value={supplierName} onChange={(e) => setSupplierName(e.target.value)} className={inputCls} /></div>
         <input placeholder="Phone / email" value={supplierContact} onChange={(e) => setSupplierContact(e.target.value)} className={inputCls} />
         <input placeholder="Lead time (days)" type="number" value={leadTime} onChange={(e) => setLeadTime(e.target.value)} className={inputCls} />
       </div>
-      <button onClick={submit} className="mt-3 w-full rounded-lg py-2 text-sm font-semibold" style={{ background: accent, color: "#15181e" }}>
+      <button onClick={submit} className="mt-3 w-full rounded-lg py-2 text-sm font-semibold" style={{ background: accent, color: "#ffffff" }}>
         Add item
       </button>
     </div>
@@ -303,10 +314,10 @@ function EditItemForm({ accent, item, onSave, onClose }) {
   };
 
   return (
-    <div className="rounded-xl p-4 mt-3" style={{ background: "#20242c", border: "1px solid #ffffff14" }}>
+    <div className="rounded-xl p-4 mt-3" style={{ background: "#F3F5F4", border: "1px solid #00000012" }}>
       <div className="flex justify-between items-center mb-3">
         <span className="text-sm font-semibold tracking-wide" style={{ color: accent }}>EDIT ITEM</span>
-        <button onClick={onClose} aria-label="Close form"><X size={16} className="text-zinc-500" /></button>
+        <button onClick={onClose} aria-label="Close form"><X size={16} className="text-zinc-400" /></button>
       </div>
       <p className="text-[10px] text-zinc-500 mb-2">Current quantity and history are untouched — this only edits item details.</p>
       <div className="grid grid-cols-2 gap-2">
@@ -321,12 +332,12 @@ function EditItemForm({ accent, item, onSave, onClose }) {
         </select>
         <input placeholder="Reorder below" type="number" value={threshold} onChange={(e) => setThreshold(e.target.value)} className={inputCls} />
 
-        <div className="col-span-2 text-[10px] uppercase tracking-wide text-zinc-500 mb-1 mt-1">Supplier (optional)</div>
+        <div className="col-span-2 text-[10px] uppercase tracking-wide text-zinc-400 mb-1 mt-1">Supplier (optional)</div>
         <div className="col-span-2"><input placeholder="Supplier name" value={supplierName} onChange={(e) => setSupplierName(e.target.value)} className={inputCls} /></div>
         <input placeholder="Phone / email" value={supplierContact} onChange={(e) => setSupplierContact(e.target.value)} className={inputCls} />
         <input placeholder="Lead time (days)" type="number" value={leadTime} onChange={(e) => setLeadTime(e.target.value)} className={inputCls} />
       </div>
-      <button onClick={submit} className="mt-3 w-full rounded-lg py-2 text-sm font-semibold" style={{ background: accent, color: "#15181e" }}>
+      <button onClick={submit} className="mt-3 w-full rounded-lg py-2 text-sm font-semibold" style={{ background: accent, color: "#ffffff" }}>
         Save changes
       </button>
     </div>
@@ -335,17 +346,17 @@ function EditItemForm({ accent, item, onSave, onClose }) {
 
 function MovementRow({ h, showItem }) {
   const icon = h.type === "in" ? ArrowDownCircle : h.type === "out" ? ArrowUpCircle : Truck;
-  const color = h.type === "in" ? "#6FCF97" : h.type === "out" ? "#E2574C" : "#4FA8A0";
+  const color = h.type === "in" ? "#2E9E5B" : h.type === "out" ? "#D1453B" : "#3E8E86";
   const Icon = icon;
   return (
     <div className="flex items-center gap-2 py-1.5">
       <Icon size={13} style={{ color }} className="shrink-0" />
       <div className="flex-1 min-w-0">
-        <div className="text-xs text-zinc-400 truncate">
-          {showItem && <span className="text-zinc-300 font-medium">{showItem} · </span>}
+        <div className="text-xs text-zinc-600 truncate">
+          {showItem && <span className="text-zinc-800 font-medium">{showItem} · </span>}
           {h.note || h.type}
         </div>
-        <div className="text-[10px] text-zinc-600 flex items-center gap-1">
+        <div className="text-[10px] text-zinc-400 flex items-center gap-1">
           <User size={9} /> {h.by || "Unknown"} · {fmtDate(h.date)}
         </div>
       </div>
@@ -402,45 +413,45 @@ function ItemCard({ item, accent, name, isBoss, onUpdate, onDelete }) {
   };
 
   return (
-    <div className="rounded-xl overflow-hidden" style={{ background: "#1c1f26", border: `1px solid ${low ? "#E2574C40" : "#ffffff0f"}` }}>
+    <div className="rounded-xl overflow-hidden" style={{ background: "#FFFFFF", border: `1px solid ${low ? "#D1453B55" : "#00000014"}` }}>
       <button className="w-full px-3.5 py-3 flex items-center gap-3 text-left" onClick={() => setOpen(!open)}>
-        <GaugeDot pct={pct} accent={low ? "#E2574C" : accent} />
+        <GaugeDot pct={pct} accent={low ? "#D1453B" : accent} />
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-medium text-zinc-100 truncate">{item.name}</div>
+          <div className="text-sm font-medium text-zinc-900 truncate">{item.name}</div>
           <div className="text-xs text-zinc-500 mt-0.5 truncate">
             {item.category}{item.supplier?.name ? ` · ${item.supplier.name}` : ""}
           </div>
         </div>
-        <span className="mono-font text-xs shrink-0" style={{ color: low ? "#E2574C" : "#e4e4e7" }}>
+        <span className="mono-font text-xs shrink-0" style={{ color: low ? "#D1453B" : "#27292E" }}>
           {item.qty}{item.unit}
         </span>
-        {open ? <ChevronUp size={16} className="text-zinc-600" /> : <ChevronDown size={16} className="text-zinc-600" />}
+        {open ? <ChevronUp size={16} className="text-zinc-400" /> : <ChevronDown size={16} className="text-zinc-400" />}
       </button>
 
       {open && (
-        <div className="px-3.5 pb-3.5" style={{ borderTop: "1px solid #ffffff0f" }}>
+        <div className="px-3.5 pb-3.5" style={{ borderTop: "1px solid #00000010" }}>
           {low && (
-            <div className="flex items-center gap-1.5 mt-3 mb-1 text-[11px]" style={{ color: "#E2574C" }}>
+            <div className="flex items-center gap-1.5 mt-3 mb-1 text-[11px]" style={{ color: "#D1453B" }}>
               <AlertTriangle size={11} /> Below reorder point ({item.threshold}{item.unit})
             </div>
           )}
 
           {item.supplier?.name && (
-            <div className="mt-3 rounded-lg px-3 py-2 text-xs text-zinc-400" style={{ background: "#15181e" }}>
-              <div className="flex items-center gap-1.5 text-zinc-300 font-medium"><Truck size={12} /> {item.supplier.name}</div>
+            <div className="mt-3 rounded-lg px-3 py-2 text-xs text-zinc-600" style={{ background: "#F7F8F7" }}>
+              <div className="flex items-center gap-1.5 text-zinc-800 font-medium"><Truck size={12} /> {item.supplier.name}</div>
               {item.supplier.contact && <div className="mt-0.5">{item.supplier.contact}</div>}
               {item.supplier.leadTime != null && <div className="mt-0.5 flex items-center gap-1"><Clock size={11} /> {item.supplier.leadTime} day lead time</div>}
             </div>
           )}
 
           <div className="flex gap-2 mt-3">
-            <button onClick={() => toggleAction("in")} className="flex-1 flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-medium" style={{ background: activeAction === "in" ? "#6FCF9740" : "#6FCF9720", color: "#6FCF97" }}>
+            <button onClick={() => toggleAction("in")} className="flex-1 flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-medium" style={{ background: activeAction === "in" ? "#2E9E5B2a" : "#2E9E5B15", color: "#2E9E5B" }}>
               <ArrowDownCircle size={13} /> Stock in
             </button>
-            <button onClick={() => toggleAction("out")} className="flex-1 flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-medium" style={{ background: activeAction === "out" ? "#E2574C40" : "#E2574C20", color: "#E2574C" }}>
+            <button onClick={() => toggleAction("out")} className="flex-1 flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-medium" style={{ background: activeAction === "out" ? "#D1453B2a" : "#D1453B15", color: "#D1453B" }}>
               <ArrowUpCircle size={13} /> Stock out
             </button>
-            <button onClick={() => toggleAction("reorder")} className="flex-1 flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-medium" style={{ background: activeAction === "reorder" ? "#4FA8A040" : "#4FA8A020", color: "#4FA8A0" }}>
+            <button onClick={() => toggleAction("reorder")} className="flex-1 flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-medium" style={{ background: activeAction === "reorder" ? "#3E8E862a" : "#3E8E8615", color: "#3E8E86" }}>
               <RotateCcw size={13} /> Reorder
             </button>
           </div>
@@ -465,7 +476,7 @@ function ItemCard({ item, accent, name, isBoss, onUpdate, onDelete }) {
               <button
                 onClick={() => (activeAction === "reorder" ? logReorder() : move(activeAction))}
                 className="px-4 rounded-lg text-xs font-semibold shrink-0"
-                style={{ background: accent, color: "#15181e" }}
+                style={{ background: accent, color: "#ffffff" }}
               >
                 Confirm
               </button>
@@ -473,9 +484,9 @@ function ItemCard({ item, accent, name, isBoss, onUpdate, onDelete }) {
           )}
 
           <div className="mt-3">
-            <div className="text-[10px] uppercase tracking-wide text-zinc-500 mb-1">History</div>
+            <div className="text-[10px] uppercase tracking-wide text-zinc-400 mb-1">History</div>
             {item.history.length === 0 ? (
-              <div className="text-xs text-zinc-600 py-1">No movements yet.</div>
+              <div className="text-xs text-zinc-400 py-1">No movements yet.</div>
             ) : (
               item.history.slice(0, 8).map((h) => <MovementRow key={h.id} h={h} />)
             )}
@@ -483,10 +494,10 @@ function ItemCard({ item, accent, name, isBoss, onUpdate, onDelete }) {
 
           {isBoss && !editing && (
             <div className="mt-3 flex items-center gap-4">
-              <button onClick={() => setEditing(true)} className="flex items-center gap-1.5 text-xs text-zinc-400">
+              <button onClick={() => setEditing(true)} className="flex items-center gap-1.5 text-xs text-zinc-500">
                 <Pencil size={12} /> Edit item
               </button>
-              <button onClick={() => onDelete(item.id)} className="flex items-center gap-1.5 text-xs text-zinc-600">
+              <button onClick={() => onDelete(item.id)} className="flex items-center gap-1.5 text-xs text-zinc-400">
                 <Trash2 size={12} /> Remove item
               </button>
             </div>
@@ -541,13 +552,13 @@ function BulkImportForm({ accent, name, onImport, onClose }) {
   };
 
   return (
-    <div className="rounded-xl p-4 mb-3" style={{ background: "#20242c", border: "1px solid #ffffff14" }}>
+    <div className="rounded-xl p-4 mb-3" style={{ background: "#F3F5F4", border: "1px solid #00000012" }}>
       <div className="flex justify-between items-center mb-3">
         <span className="text-sm font-semibold tracking-wide" style={{ color: accent }}>BULK IMPORT ITEMS</span>
-        <button onClick={onClose} aria-label="Close form"><X size={16} className="text-zinc-500" /></button>
+        <button onClick={onClose} aria-label="Close form"><X size={16} className="text-zinc-400" /></button>
       </div>
       <p className="text-[10px] text-zinc-500 mb-2">
-        One item per line: <span className="text-zinc-400">Name, Category, Qty, Unit, Reorder threshold</span><br />
+        One item per line: <span className="text-zinc-600">Name, Category, Qty, Unit, Reorder threshold</span><br />
         Category must be exactly: Raw material / Packaging / Finished good
       </p>
       <textarea
@@ -558,11 +569,11 @@ function BulkImportForm({ accent, name, onImport, onClose }) {
         className={inputCls + " font-mono text-xs resize-none"}
       />
       {result && (
-        <p className="text-xs mt-2" style={{ color: result.added > 0 ? "#6FCF97" : "#E2574C" }}>
+        <p className="text-xs mt-2" style={{ color: result.added > 0 ? "#2E9E5B" : "#D1453B" }}>
           Added {result.added} item{result.added !== 1 ? "s" : ""}{result.skipped > 0 ? `, skipped ${result.skipped} (bad format)` : ""}.
         </p>
       )}
-      <button onClick={submit} className="mt-3 w-full rounded-lg py-2 text-sm font-semibold" style={{ background: accent, color: "#15181e" }}>
+      <button onClick={submit} className="mt-3 w-full rounded-lg py-2 text-sm font-semibold" style={{ background: accent, color: "#ffffff" }}>
         Import items
       </button>
     </div>
@@ -609,10 +620,10 @@ function ProductionForm({ accent, name, rawMaterials, onSubmit, onClose }) {
   };
 
   return (
-    <div className="rounded-xl p-4 mb-3" style={{ background: "#20242c", border: "1px solid #ffffff14" }}>
+    <div className="rounded-xl p-4 mb-3" style={{ background: "#F3F5F4", border: "1px solid #00000012" }}>
       <div className="flex justify-between items-center mb-3">
         <span className="text-sm font-semibold tracking-wide" style={{ color: accent }}>NEW PRODUCTION BATCH</span>
-        <button onClick={onClose} aria-label="Close form"><X size={16} className="text-zinc-500" /></button>
+        <button onClick={onClose} aria-label="Close form"><X size={16} className="text-zinc-400" /></button>
       </div>
 
       <div className="grid grid-cols-2 gap-2">
@@ -629,9 +640,9 @@ function ProductionForm({ accent, name, rawMaterials, onSubmit, onClose }) {
       </div>
 
       <div className="mt-3">
-        <div className="text-[10px] uppercase tracking-wide text-zinc-500 mb-1.5">Raw materials used</div>
+        <div className="text-[10px] uppercase tracking-wide text-zinc-400 mb-1.5">Raw materials used</div>
         {rawMaterials.length === 0 && (
-          <p className="text-xs text-zinc-600 mb-2">No raw materials tracked yet for this brand — add some in the Items tab first.</p>
+          <p className="text-xs text-zinc-500 mb-2">No raw materials tracked yet for this brand — add some in the Items tab first.</p>
         )}
         <div className="space-y-2">
           {rows.map((row) => {
@@ -658,7 +669,7 @@ function ProductionForm({ accent, name, rawMaterials, onSubmit, onClose }) {
                 />
                 {rows.length > 1 && (
                   <button onClick={() => removeRow(row.id)} aria-label="Remove row" className="shrink-0">
-                    <X size={16} className="text-zinc-600" />
+                    <X size={16} className="text-zinc-400" />
                   </button>
                 )}
               </div>
@@ -670,7 +681,7 @@ function ProductionForm({ accent, name, rawMaterials, onSubmit, onClose }) {
         </button>
       </div>
 
-      <button onClick={submit} className="mt-4 w-full rounded-lg py-2 text-sm font-semibold" style={{ background: accent, color: "#15181e" }}>
+      <button onClick={submit} className="mt-4 w-full rounded-lg py-2 text-sm font-semibold" style={{ background: accent, color: "#ffffff" }}>
         Log production &amp; update stock
       </button>
     </div>
@@ -680,34 +691,34 @@ function ProductionForm({ accent, name, rawMaterials, onSubmit, onClose }) {
 function ProductionCard({ batch, accent, isBoss, onDelete }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="rounded-xl overflow-hidden" style={{ background: "#1c1f26", border: "1px solid #ffffff0f" }}>
+    <div className="rounded-xl overflow-hidden" style={{ background: "#FFFFFF", border: "1px solid #00000014" }}>
       <button className="w-full px-3.5 py-3 flex items-center gap-3 text-left" onClick={() => setOpen(!open)}>
         <Factory size={18} style={{ color: accent }} className="shrink-0" />
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-medium text-zinc-100 truncate">{batch.productName}</div>
+          <div className="text-sm font-medium text-zinc-900 truncate">{batch.productName}</div>
           <div className="text-xs text-zinc-500 mt-0.5 truncate">
             Batch {batch.batchNumber} · {batch.date}{batch.machineNumber ? ` · Machine ${batch.machineNumber}` : ""}
           </div>
         </div>
-        <span className="mono-font text-xs shrink-0 text-zinc-200">+{batch.outputQty}{batch.outputUnit}</span>
-        {open ? <ChevronUp size={16} className="text-zinc-600" /> : <ChevronDown size={16} className="text-zinc-600" />}
+        <span className="mono-font text-xs shrink-0 text-zinc-700">+{batch.outputQty}{batch.outputUnit}</span>
+        {open ? <ChevronUp size={16} className="text-zinc-400" /> : <ChevronDown size={16} className="text-zinc-400" />}
       </button>
       {open && (
-        <div className="px-3.5 pb-3.5" style={{ borderTop: "1px solid #ffffff0f" }}>
-          <div className="mt-3 text-[10px] uppercase tracking-wide text-zinc-500 mb-1">Materials consumed</div>
+        <div className="px-3.5 pb-3.5" style={{ borderTop: "1px solid #00000010" }}>
+          <div className="mt-3 text-[10px] uppercase tracking-wide text-zinc-400 mb-1">Materials consumed</div>
           <div className="space-y-1">
             {batch.materials.map((m, i) => (
               <div key={i} className="flex items-center justify-between text-xs">
-                <span className="text-zinc-400">{m.itemName}</span>
-                <span className="mono-font" style={{ color: "#E2574C" }}>−{m.qty}{m.unit}</span>
+                <span className="text-zinc-600">{m.itemName}</span>
+                <span className="mono-font" style={{ color: "#D1453B" }}>−{m.qty}{m.unit}</span>
               </div>
             ))}
           </div>
-          <div className="text-[10px] text-zinc-600 flex items-center gap-1 mt-3">
+          <div className="text-[10px] text-zinc-400 flex items-center gap-1 mt-3">
             <User size={9} /> Logged by {batch.by} · {fmtDate(batch.createdAt)}
           </div>
           {isBoss && (
-            <button onClick={() => onDelete(batch.id)} className="mt-3 flex items-center gap-1.5 text-xs text-zinc-600">
+            <button onClick={() => onDelete(batch.id)} className="mt-3 flex items-center gap-1.5 text-xs text-zinc-400">
               <Trash2 size={12} /> Remove log entry (stock changes stay as-is)
             </button>
           )}
@@ -813,16 +824,13 @@ export default function App() {
     saveBatches(batches.filter((b) => b.id !== id));
   };
 
-  if (!session) return <PinGate accent={meta.accent} onLogin={handleLogin} />;
+  if (!session) return <PinGate onLogin={handleLogin} />;
 
   return (
-    <div className="min-h-screen w-full" style={{ background: "#15181e", fontFamily: "'Inter', system-ui, sans-serif" }}>
-      <div className="px-4 pt-6 pb-4" style={{ borderBottom: "1px solid #ffffff0f" }}>
+    <div className="min-h-screen w-full" style={{ background: "#ffffff", fontFamily: "'Inter', system-ui, sans-serif" }}>
+      <div className="px-4 pt-6 pb-4" style={{ borderBottom: "1px solid #00000010" }}>
         <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <img src="/icon-512.png" alt="Logo" className="w-7 h-7 rounded-lg" />
-            <h1 className="text-lg font-bold text-zinc-100 tracking-tight">Inventory</h1>
-          </div>
+          <Wordmark />
           <button onClick={() => saveSession(null)} className="flex items-center gap-1 text-[11px] text-zinc-500">
             {isBoss && <Shield size={11} style={{ color: meta.accent }} />}
             <User size={11} /> {session.name}
@@ -835,11 +843,11 @@ export default function App() {
               onClick={() => { setBrand(key); setFilter("All"); }}
               className="flex-1 text-left rounded-xl px-3 py-2.5 transition-colors"
               style={{
-                background: brand === key ? b.accentDim : "#1c1f26",
-                border: `1px solid ${brand === key ? b.accent : "#ffffff14"}`,
+                background: brand === key ? b.accentDim : "#F7F8F7",
+                border: `1px solid ${brand === key ? b.accent : "#00000012"}`,
               }}
             >
-              <div className="text-sm font-bold" style={{ color: brand === key ? b.accent : "#a1a1aa" }}>
+              <div className="text-sm font-bold" style={{ color: brand === key ? b.accent : "#6B7280" }}>
                 {b.label}
               </div>
               <div className="text-[10px] text-zinc-500 mt-0.5 leading-tight">{b.sub}</div>
@@ -849,9 +857,9 @@ export default function App() {
       </div>
 
       {lowStock.length > 0 && (
-        <div className="mx-4 mt-3 rounded-lg px-3 py-2 flex items-center gap-2" style={{ background: "#E2574C1a", border: "1px solid #E2574C40" }}>
-          <AlertTriangle size={14} style={{ color: "#E2574C" }} />
-          <span className="text-xs text-zinc-300">
+        <div className="mx-4 mt-3 rounded-lg px-3 py-2 flex items-center gap-2" style={{ background: "#D1453B14", border: "1px solid #D1453B30" }}>
+          <AlertTriangle size={14} style={{ color: "#D1453B" }} />
+          <span className="text-xs text-zinc-700">
             {lowStock.length} item{lowStock.length > 1 ? "s" : ""} at or below reorder point
           </span>
         </div>
@@ -868,7 +876,7 @@ export default function App() {
             key={key}
             onClick={() => setTab(key)}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors whitespace-nowrap"
-            style={{ background: tab === key ? meta.accent : "transparent", color: tab === key ? "#15181e" : "#a1a1aa" }}
+            style={{ background: tab === key ? meta.accent : "transparent", color: tab === key ? "#ffffff" : "#6B7280" }}
           >
             <Icon size={12} /> {label}
           </button>
@@ -885,8 +893,8 @@ export default function App() {
                 className="px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors"
                 style={{
                   background: filter === f ? meta.accent : "transparent",
-                  color: filter === f ? "#15181e" : "#a1a1aa",
-                  border: filter === f ? "none" : "1px solid #ffffff14",
+                  color: filter === f ? "#ffffff" : "#6B7280",
+                  border: filter === f ? "none" : "1px solid #00000014",
                 }}
               >
                 {f}
@@ -906,7 +914,7 @@ export default function App() {
 
       <div className="px-4 py-4 pb-24">
         {loading ? (
-          <div className="text-center text-zinc-500 text-sm py-10">Loading…</div>
+          <div className="text-center text-zinc-400 text-sm py-10">Loading…</div>
         ) : tab === "items" ? (
           <>
             {showBulkImport && (
@@ -920,11 +928,11 @@ export default function App() {
             {showForm && <ItemForm accent={meta.accent} name={session.name} onClose={() => setShowForm(false)} onAdd={addItem} />}
             {visible.length === 0 && !showForm && (
               <div className="text-center py-14">
-                <Package size={28} className="mx-auto text-zinc-700 mb-2" />
+                <Package size={28} className="mx-auto text-zinc-300 mb-2" />
                 <p className="text-sm text-zinc-500">
                   {items.length === 0 ? `No inventory tracked for ${meta.label} yet.` : "Nothing matches this filter."}
                 </p>
-                {items.length === 0 && <p className="text-xs text-zinc-600 mt-1">Tap + to add your first item.</p>}
+                {items.length === 0 && <p className="text-xs text-zinc-400 mt-1">Tap + to add your first item.</p>}
               </div>
             )}
             <div className="space-y-2">
@@ -946,9 +954,9 @@ export default function App() {
             )}
             {batches.length === 0 && !showProdForm && (
               <div className="text-center py-14">
-                <Factory size={28} className="mx-auto text-zinc-700 mb-2" />
+                <Factory size={28} className="mx-auto text-zinc-300 mb-2" />
                 <p className="text-sm text-zinc-500">No production logged yet for {meta.label}.</p>
-                <p className="text-xs text-zinc-600 mt-1">Tap + to log your first batch.</p>
+                <p className="text-xs text-zinc-400 mt-1">Tap + to log your first batch.</p>
               </div>
             )}
             <div className="space-y-2">
@@ -958,10 +966,10 @@ export default function App() {
             </div>
           </>
         ) : tab === "history" ? (
-          <div className="rounded-xl px-3.5 py-2" style={{ background: "#1c1f26", border: "1px solid #ffffff0f" }}>
+          <div className="rounded-xl px-3.5 py-2" style={{ background: "#FFFFFF", border: "1px solid #00000014" }}>
             {allHistory.length === 0 ? (
               <div className="text-center py-10">
-                <HistoryIcon size={24} className="mx-auto text-zinc-700 mb-2" />
+                <HistoryIcon size={24} className="mx-auto text-zinc-300 mb-2" />
                 <p className="text-sm text-zinc-500">No activity logged yet for {meta.label}.</p>
               </div>
             ) : (
@@ -975,19 +983,19 @@ export default function App() {
             )}
           </div>
         ) : (
-          <div className="rounded-xl px-3.5 py-2" style={{ background: "#1c1f26", border: "1px solid #ffffff0f" }}>
+          <div className="rounded-xl px-3.5 py-2" style={{ background: "#FFFFFF", border: "1px solid #00000014" }}>
             {logins.length === 0 ? (
               <div className="text-center py-10">
-                <Shield size={24} className="mx-auto text-zinc-700 mb-2" />
+                <Shield size={24} className="mx-auto text-zinc-300 mb-2" />
                 <p className="text-sm text-zinc-500">No logins recorded yet.</p>
               </div>
             ) : (
               <div>
                 {logins.map((l) => (
                   <div key={l.id} className="flex items-center gap-2 py-1.5">
-                    {l.role === "boss" ? <Shield size={13} style={{ color: meta.accent }} className="shrink-0" /> : <User size={13} className="text-zinc-500 shrink-0" />}
-                    <span className="text-xs text-zinc-300 flex-1">{l.name}</span>
-                    <span className="text-[10px] text-zinc-600">{fmtDate(l.date)}</span>
+                    {l.role === "boss" ? <Shield size={13} style={{ color: meta.accent }} className="shrink-0" /> : <User size={13} className="text-zinc-400 shrink-0" />}
+                    <span className="text-xs text-zinc-700 flex-1">{l.name}</span>
+                    <span className="text-[10px] text-zinc-400">{fmtDate(l.date)}</span>
                   </div>
                 ))}
               </div>
@@ -1003,7 +1011,7 @@ export default function App() {
           style={{ background: meta.accent }}
           aria-label="Add new item"
         >
-          <Plus size={22} color="#15181e" strokeWidth={2.5} />
+          <Plus size={22} color="#ffffff" strokeWidth={2.5} />
         </button>
       )}
 
@@ -1014,7 +1022,7 @@ export default function App() {
           style={{ background: meta.accent }}
           aria-label="Log new production batch"
         >
-          <Plus size={22} color="#15181e" strokeWidth={2.5} />
+          <Plus size={22} color="#ffffff" strokeWidth={2.5} />
         </button>
       )}
     </div>
