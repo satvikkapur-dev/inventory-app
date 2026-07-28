@@ -4,6 +4,7 @@ import { db } from "./firebase";
 import {
   Plus, Package, AlertTriangle, Trash2, X, ChevronDown, ChevronUp,
   Truck, Clock, ArrowDownCircle, ArrowUpCircle, RotateCcw, Gauge, User, History as HistoryIcon,
+  Shield, LogIn, Lock,
 } from "lucide-react";
 
 const BRANDS = {
@@ -22,6 +23,14 @@ const BRANDS = {
 };
 
 const CATEGORIES = ["Raw material", "Packaging", "Finished good"];
+
+// Add/edit your team here. role "boss" can delete items, "staff" cannot.
+const USERS = [
+  { name: "Satvik", pin: "8941", role: "boss" },
+  { name: "Ravi", pin: "2814", role: "staff" },
+  { name: "Vijay", pin: "2314", role: "staff" },
+  { name: "Jyoti", pin: "3214", role: "staff" },
+];
 
 function uid() {
   return Math.random().toString(36).slice(2, 10);
@@ -66,26 +75,52 @@ function useInventory(brand) {
   return { items, save, loading };
 }
 
-function useName() {
-  const [name, setName] = useState(() => {
+function useLoginLog() {
+  const [logins, setLogins] = useState([]);
+
+  useEffect(() => {
+    const ref = doc(db, "activity", "logins");
+    const unsub = onSnapshot(ref, (snap) => {
+      setLogins(snap.exists() ? snap.data().entries || [] : []);
+    });
+    return () => unsub();
+  }, []);
+
+  const record = async (name, role) => {
+    const entry = { id: uid(), name, role, date: new Date().toISOString() };
+    const next = [entry, ...logins].slice(0, 200); // keep last 200
+    setLogins(next);
     try {
-      return localStorage.getItem("my-name");
+      await setDoc(doc(db, "activity", "logins"), { entries: next });
+    } catch (e) {
+      console.error("Failed to log login", e);
+    }
+  };
+
+  return { logins, record };
+}
+
+function useSession() {
+  const [session, setSession] = useState(() => {
+    try {
+      const raw = localStorage.getItem("my-session");
+      return raw ? JSON.parse(raw) : null;
     } catch {
       return null;
     }
   });
 
-  const save = (n) => {
+  const save = (s) => {
     try {
-      if (n === null) localStorage.removeItem("my-name");
-      else localStorage.setItem("my-name", n);
+      if (s === null) localStorage.removeItem("my-session");
+      else localStorage.setItem("my-session", JSON.stringify(s));
     } catch {
       /* ignore */
     }
-    setName(n);
+    setSession(s);
   };
 
-  return { name, save };
+  return { session, save };
 }
 
 function GaugeDot({ pct, accent, size = 36 }) {
@@ -107,28 +142,44 @@ function GaugeDot({ pct, accent, size = 36 }) {
 const inputCls =
   "w-full bg-[#15181e] text-sm text-zinc-100 rounded-lg px-3 py-2 outline-none border border-transparent focus:border-zinc-600 placeholder:text-zinc-500";
 
-function NameGate({ accent, onSet }) {
-  const [val, setVal] = useState("");
+function PinGate({ accent, onLogin }) {
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState("");
+
+  const submit = () => {
+    const user = USERS.find((u) => u.pin === pin.trim());
+    if (!user) {
+      setError("PIN not recognized. Try again.");
+      setPin("");
+      return;
+    }
+    onLogin(user);
+  };
+
   return (
     <div className="min-h-screen w-full flex items-center justify-center px-6" style={{ background: "#15181e", fontFamily: "'Inter', system-ui, sans-serif" }}>
       <div className="w-full max-w-xs text-center">
-        <Gauge size={24} style={{ color: accent }} className="mx-auto mb-3" />
-        <h1 style={{ fontFamily: "'Space Grotesk', sans-serif" }} className="text-lg font-bold text-zinc-100 mb-1">Who's logging in?</h1>
-        <p className="text-xs text-zinc-500 mb-4">Your name gets tagged on every entry you make, so the history stays accurate.</p>
+        <Lock size={24} style={{ color: accent }} className="mx-auto mb-3" />
+        <h1 style={{ fontFamily: "'Space Grotesk', sans-serif" }} className="text-lg font-bold text-zinc-100 mb-1">Enter your PIN</h1>
+        <p className="text-xs text-zinc-500 mb-4">Your PIN identifies you — every entry you make gets tagged with your name automatically.</p>
         <input
           autoFocus
-          placeholder="Your name"
-          value={val}
-          onChange={(e) => setVal(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && val.trim() && onSet(val.trim())}
-          className={inputCls}
+          placeholder="4-digit PIN"
+          type="password"
+          inputMode="numeric"
+          value={pin}
+          onChange={(e) => { setPin(e.target.value); setError(""); }}
+          onKeyDown={(e) => e.key === "Enter" && submit()}
+          className={inputCls + " text-center tracking-[0.3em] text-lg"}
+          maxLength={6}
         />
+        {error && <p className="text-xs mt-2" style={{ color: "#E2574C" }}>{error}</p>}
         <button
-          onClick={() => val.trim() && onSet(val.trim())}
-          className="mt-3 w-full rounded-lg py-2 text-sm font-semibold"
+          onClick={submit}
+          className="mt-3 w-full rounded-lg py-2 text-sm font-semibold flex items-center justify-center gap-1.5"
           style={{ background: accent, color: "#15181e" }}
         >
-          Continue
+          <LogIn size={14} /> Continue
         </button>
       </div>
     </div>
@@ -220,9 +271,9 @@ function MovementRow({ h, showItem }) {
   );
 }
 
-function ItemCard({ item, accent, name, onUpdate, onDelete }) {
+function ItemCard({ item, accent, name, isBoss, onUpdate, onDelete }) {
   const [open, setOpen] = useState(false);
-  const [activeAction, setActiveAction] = useState(null); // "in" | "out" | "reorder" | null
+  const [activeAction, setActiveAction] = useState(null);
   const [moveQty, setMoveQty] = useState("");
   const low = item.qty <= item.threshold;
   const pct = item.threshold > 0 ? Math.min(100, (item.qty / (item.threshold * 2)) * 100) : 100;
@@ -344,9 +395,11 @@ function ItemCard({ item, accent, name, onUpdate, onDelete }) {
             )}
           </div>
 
-          <button onClick={() => onDelete(item.id)} className="mt-3 flex items-center gap-1.5 text-xs text-zinc-600">
-            <Trash2 size={12} /> Remove item
-          </button>
+          {isBoss && (
+            <button onClick={() => onDelete(item.id)} className="mt-3 flex items-center gap-1.5 text-xs text-zinc-600">
+              <Trash2 size={12} /> Remove item
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -359,8 +412,16 @@ export default function App() {
   const [showForm, setShowForm] = useState(false);
   const [filter, setFilter] = useState("All");
   const { items, save, loading } = useInventory(brand);
-  const { name, save: saveName } = useName();
+  const { session, save: saveSession } = useSession();
+  const { logins, record } = useLoginLog();
   const meta = BRANDS[brand];
+
+  const isBoss = session?.role === "boss";
+
+  const handleLogin = (user) => {
+    saveSession({ name: user.name, role: user.role });
+    record(user.name, user.role);
+  };
 
   const lowStock = items.filter((i) => i.qty <= i.threshold);
   const visible = filter === "All" ? items : filter === "Low stock" ? lowStock : items.filter((i) => i.category === filter);
@@ -372,10 +433,13 @@ export default function App() {
   }, [items]);
 
   const updateItem = (updated) => save(items.map((i) => (i.id === updated.id ? updated : i)));
-  const deleteItem = (id) => save(items.filter((i) => i.id !== id));
+  const deleteItem = (id) => {
+    if (!isBoss) return;
+    save(items.filter((i) => i.id !== id));
+  };
   const addItem = (item) => save([item, ...items]);
 
-  if (!name) return <NameGate accent={meta.accent} onSet={saveName} />;
+  if (!session) return <PinGate accent={meta.accent} onLogin={handleLogin} />;
 
   return (
     <div className="min-h-screen w-full" style={{ background: "#15181e", fontFamily: "'Inter', system-ui, sans-serif" }}>
@@ -385,8 +449,9 @@ export default function App() {
             <Gauge size={18} style={{ color: meta.accent }} />
             <h1 className="text-lg font-bold text-zinc-100 tracking-tight">Inventory</h1>
           </div>
-          <button onClick={() => saveName(null)} className="flex items-center gap-1 text-[11px] text-zinc-500">
-            <User size={11} /> {name}
+          <button onClick={() => saveSession(null)} className="flex items-center gap-1 text-[11px] text-zinc-500">
+            {isBoss && <Shield size={11} style={{ color: meta.accent }} />}
+            <User size={11} /> {session.name}
           </button>
         </div>
         <div className="flex gap-2">
@@ -418,15 +483,16 @@ export default function App() {
         </div>
       )}
 
-      <div className="flex gap-1 px-4 mt-4">
+      <div className="flex gap-1 px-4 mt-4 overflow-x-auto">
         {[
           { key: "items", label: "Items", icon: Package },
-          { key: "history", label: "Full history", icon: HistoryIcon },
+          { key: "history", label: "History", icon: HistoryIcon },
+          ...(isBoss ? [{ key: "logins", label: "Logins", icon: Shield }] : []),
         ].map(({ key, label, icon: Icon }) => (
           <button
             key={key}
             onClick={() => setTab(key)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors whitespace-nowrap"
             style={{ background: tab === key ? meta.accent : "transparent", color: tab === key ? "#15181e" : "#a1a1aa" }}
           >
             <Icon size={12} /> {label}
@@ -458,7 +524,7 @@ export default function App() {
           <div className="text-center text-zinc-500 text-sm py-10">Loading…</div>
         ) : tab === "items" ? (
           <>
-            {showForm && <ItemForm accent={meta.accent} name={name} onClose={() => setShowForm(false)} onAdd={addItem} />}
+            {showForm && <ItemForm accent={meta.accent} name={session.name} onClose={() => setShowForm(false)} onAdd={addItem} />}
             {visible.length === 0 && !showForm && (
               <div className="text-center py-14">
                 <Package size={28} className="mx-auto text-zinc-700 mb-2" />
@@ -470,11 +536,11 @@ export default function App() {
             )}
             <div className="space-y-2">
               {visible.map((item) => (
-                <ItemCard key={item.id} item={item} accent={meta.accent} name={name} onUpdate={updateItem} onDelete={deleteItem} />
+                <ItemCard key={item.id} item={item} accent={meta.accent} name={session.name} isBoss={isBoss} onUpdate={updateItem} onDelete={deleteItem} />
               ))}
             </div>
           </>
-        ) : (
+        ) : tab === "history" ? (
           <div className="rounded-xl px-3.5 py-2" style={{ background: "#1c1f26", border: "1px solid #ffffff0f" }}>
             {allHistory.length === 0 ? (
               <div className="text-center py-10">
@@ -486,6 +552,25 @@ export default function App() {
                 {allHistory.map((h) => (
                   <div key={h.id + h.itemName}>
                     <MovementRow h={h} showItem={h.itemName} />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="rounded-xl px-3.5 py-2" style={{ background: "#1c1f26", border: "1px solid #ffffff0f" }}>
+            {logins.length === 0 ? (
+              <div className="text-center py-10">
+                <Shield size={24} className="mx-auto text-zinc-700 mb-2" />
+                <p className="text-sm text-zinc-500">No logins recorded yet.</p>
+              </div>
+            ) : (
+              <div>
+                {logins.map((l) => (
+                  <div key={l.id} className="flex items-center gap-2 py-1.5">
+                    {l.role === "boss" ? <Shield size={13} style={{ color: meta.accent }} className="shrink-0" /> : <User size={13} className="text-zinc-500 shrink-0" />}
+                    <span className="text-xs text-zinc-300 flex-1">{l.name}</span>
+                    <span className="text-[10px] text-zinc-600">{fmtDate(l.date)}</span>
                   </div>
                 ))}
               </div>
