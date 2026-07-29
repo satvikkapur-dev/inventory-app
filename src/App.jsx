@@ -4,7 +4,7 @@ import { db } from "./firebase";
 import {
   Plus, Package, AlertTriangle, Trash2, X, ChevronDown, ChevronUp,
   Truck, Clock, ArrowDownCircle, ArrowUpCircle, RotateCcw, User, History as HistoryIcon,
-  Shield, LogIn, Pencil, Factory, UploadCloud,
+  Shield, LogIn, Pencil, Factory, UploadCloud, Layers,
 } from "lucide-react";
 
 const DARK_GREEN = "#155830";
@@ -29,6 +29,7 @@ const CATEGORIES = ["Raw material", "Packaging", "Finished good"];
 const UNITS = ["g", "kg", "ml", "L", "units", "drums", "cartons"];
 const LABOR_RATE = 0.15; // 15% of material cost
 const CAN_RATES = { old: 3.5, new: 6 }; // ₹ per kg of output
+const GST_RATE = 0.18; // 18%
 
 // Add/edit your team here. role "boss" can delete/edit items, "staff" cannot.
 const USERS = [
@@ -50,6 +51,85 @@ function fmtDate(iso) {
 
 function todayStr() {
   return new Date().toISOString().slice(0, 10);
+}
+
+// ---- FIFO lot helpers ----
+
+// Weighted average cost across an item's lots (falls back to legacy costPerUnit
+// for items that haven't been migrated to lot tracking yet).
+function avgCostOf(item) {
+  if (item.lots && item.lots.length > 0) {
+    const totalQty = item.lots.reduce((s, l) => s + l.qty, 0);
+    const totalCost = item.lots.reduce((s, l) => s + l.qty * l.price, 0);
+    return totalQty > 0 ? totalCost / totalQty : 0;
+  }
+  return item.costPerUnit || 0;
+}
+
+// Consume qtyNeeded from the oldest lots first. Returns cost consumed, the
+// remaining lots, and any shortfall (qty that couldn't be found in lots).
+function consumeLotsFIFO(lots, qtyNeeded) {
+  let remaining = qtyNeeded;
+  let cost = 0;
+  const newLots = [];
+  for (const lot of lots) {
+    if (remaining <= 0) {
+      newLots.push(lot);
+      continue;
+    }
+    if (lot.qty <= remaining) {
+      cost += lot.qty * lot.price;
+      remaining -= lot.qty;
+      // lot fully used up, dropped from the list
+    } else {
+      cost += remaining * lot.price;
+      newLots.push({ ...lot, qty: lot.qty - remaining });
+      remaining = 0;
+    }
+  }
+  return { cost, remainingLots: newLots, shortfall: Math.max(0, remaining) };
+}
+
+// Consume qty from an item (production use or manual stock-out). Works with
+// real FIFO lots if present, otherwise falls back to the flat legacy cost.
+function consumeMaterial(item, qtyNeeded) {
+  if (item.lots && item.lots.length > 0) {
+    const { cost, remainingLots, shortfall } = consumeLotsFIFO(item.lots, qtyNeeded);
+    const consumedQty = qtyNeeded - shortfall;
+    return {
+      cost,
+      newQty: Math.max(0, item.qty - consumedQty),
+      newLots: remainingLots,
+      unitCostUsed: consumedQty > 0 ? cost / consumedQty : 0,
+    };
+  }
+  const cpu = item.costPerUnit || 0;
+  return {
+    cost: qtyNeeded * cpu,
+    newQty: Math.max(0, item.qty - qtyNeeded),
+    newLots: item.lots || [],
+    unitCostUsed: cpu,
+  };
+}
+
+// Add stock at a given price (creates a new lot). If no price is given, adds
+// to the most recent lot at its existing price (or a zero-price lot if none exist).
+function addStockInLot(item, qty, price) {
+  if (item.category !== "Raw material") {
+    return { qty: item.qty + qty, lots: item.lots };
+  }
+  let lots = item.lots ? [...item.lots] : [];
+  if (price) {
+    lots.push({ id: uid(), qty, price: Number(price), date: new Date().toISOString() });
+  } else if (lots.length > 0) {
+    const last = { ...lots[lots.length - 1] };
+    last.qty += qty;
+    lots[lots.length - 1] = last;
+  } else {
+    lots.push({ id: uid(), qty, price: 0, date: new Date().toISOString() });
+  }
+  const newQty = lots.reduce((s, l) => s + l.qty, 0);
+  return { qty: newQty, lots };
 }
 
 function Wordmark({ size = "text-lg" }) {
@@ -275,22 +355,26 @@ function ItemForm({ accent, name, canViewCosting, onAdd, onClose }) {
 
   const submit = () => {
     if (!nm.trim() || !qty || !threshold) return;
+    const q = Number(qty);
+    const isRaw = category === "Raw material";
+    const price = costPerUnit ? Number(costPerUnit) : 0;
     onAdd({
       id: uid(),
       name: nm.trim(),
       category,
-      qty: Number(qty),
+      qty: q,
       unit,
       threshold: Number(threshold),
       shared,
-      costPerUnit: costPerUnit ? Number(costPerUnit) : 0,
+      costPerUnit: price,
+      lots: isRaw && price ? [{ id: uid(), qty: q, price, date: new Date().toISOString() }] : undefined,
       supplier: {
         name: supplierName.trim(),
         contact: supplierContact.trim(),
         leadTime: leadTime ? Number(leadTime) : null,
       },
       history: [
-        { id: uid(), type: "in", qty: Number(qty), date: new Date().toISOString(), note: "Initial stock", by: name },
+        { id: uid(), type: "in", qty: q, date: new Date().toISOString(), note: "Initial stock", by: name },
       ],
     });
     onClose();
@@ -316,7 +400,12 @@ function ItemForm({ accent, name, canViewCosting, onAdd, onClose }) {
         <div className="col-span-2"><input placeholder="Reorder below" type="number" value={threshold} onChange={(e) => setThreshold(e.target.value)} className={inputCls} /></div>
 
         {canViewCosting && (
-          <div className="col-span-2"><input placeholder="Cost per unit (₹)" type="number" value={costPerUnit} onChange={(e) => setCostPerUnit(e.target.value)} className={inputCls} /></div>
+          <div className="col-span-2">
+            <input placeholder="Price for this stock (₹ per unit)" type="number" value={costPerUnit} onChange={(e) => setCostPerUnit(e.target.value)} className={inputCls} />
+            {category === "Raw material" && (
+              <p className="text-[10px] text-zinc-400 mt-1">This becomes the first lot. Future stock-ins at a different price add a new lot, consumed oldest-first.</p>
+            )}
+          </div>
         )}
 
         <label className="col-span-2 flex items-center gap-2 text-xs text-zinc-600 mt-1">
@@ -346,9 +435,25 @@ function EditItemForm({ accent, item, canViewCosting, onSave, onClose }) {
   const [leadTime, setLeadTime] = useState(item.supplier?.leadTime != null ? String(item.supplier.leadTime) : "");
   const [shared, setShared] = useState(!!item.shared);
   const [costPerUnit, setCostPerUnit] = useState(item.costPerUnit != null ? String(item.costPerUnit) : "");
+  const [lots, setLots] = useState(item.lots ? item.lots.map((l) => ({ ...l })) : []);
+  const [newLotQty, setNewLotQty] = useState("");
+  const [newLotPrice, setNewLotPrice] = useState("");
+
+  const showLots = canViewCosting && category === "Raw material";
+
+  const addLot = () => {
+    if (!newLotQty || !newLotPrice) return;
+    setLots([...lots, { id: uid(), qty: Number(newLotQty), price: Number(newLotPrice), date: new Date().toISOString() }]);
+    setNewLotQty("");
+    setNewLotPrice("");
+  };
+  const removeLot = (id) => setLots(lots.filter((l) => l.id !== id));
+  const updateLot = (id, patch) => setLots(lots.map((l) => (l.id === id ? { ...l, ...patch } : l)));
 
   const submit = () => {
     if (!nm.trim() || !threshold) return;
+    const usingLots = showLots && lots.length > 0;
+    const totalLotQty = lots.reduce((s, l) => s + Number(l.qty || 0), 0);
     onSave({
       ...item,
       name: nm.trim(),
@@ -356,7 +461,9 @@ function EditItemForm({ accent, item, canViewCosting, onSave, onClose }) {
       unit,
       threshold: Number(threshold),
       shared,
-      costPerUnit: costPerUnit ? Number(costPerUnit) : 0,
+      qty: usingLots ? totalLotQty : item.qty,
+      costPerUnit: costPerUnit ? Number(costPerUnit) : item.costPerUnit || 0,
+      lots: showLots ? lots.map((l) => ({ ...l, qty: Number(l.qty), price: Number(l.price) })) : item.lots,
       supplier: {
         name: supplierName.trim(),
         contact: supplierContact.trim(),
@@ -372,7 +479,7 @@ function EditItemForm({ accent, item, canViewCosting, onSave, onClose }) {
         <span className="text-sm font-semibold tracking-wide" style={{ color: accent }}>EDIT ITEM</span>
         <button onClick={onClose} aria-label="Close form"><X size={16} className="text-zinc-400" /></button>
       </div>
-      <p className="text-[10px] text-zinc-500 mb-2">Current quantity and history are untouched — this only edits item details.</p>
+      <p className="text-[10px] text-zinc-500 mb-2">History is untouched — this edits item details{showLots ? " and lots" : ""}.</p>
       <div className="grid grid-cols-2 gap-2">
         <div className="col-span-2"><input placeholder="Item name" value={nm} onChange={(e) => setNm(e.target.value)} className={inputCls} /></div>
         <div className="col-span-2">
@@ -385,7 +492,7 @@ function EditItemForm({ accent, item, canViewCosting, onSave, onClose }) {
         </select>
         <input placeholder="Reorder below" type="number" value={threshold} onChange={(e) => setThreshold(e.target.value)} className={inputCls} />
 
-        {canViewCosting && (
+        {!showLots && canViewCosting && (
           <div className="col-span-2"><input placeholder="Cost per unit (₹)" type="number" value={costPerUnit} onChange={(e) => setCostPerUnit(e.target.value)} className={inputCls} /></div>
         )}
 
@@ -399,6 +506,44 @@ function EditItemForm({ accent, item, canViewCosting, onSave, onClose }) {
         <input placeholder="Phone / email" value={supplierContact} onChange={(e) => setSupplierContact(e.target.value)} className={inputCls} />
         <input placeholder="Lead time (days)" type="number" value={leadTime} onChange={(e) => setLeadTime(e.target.value)} className={inputCls} />
       </div>
+
+      {showLots && (
+        <div className="mt-3">
+          <div className="text-[10px] uppercase tracking-wide text-zinc-400 mb-1.5">
+            Lots (oldest at top — consumed first) · Total: {lots.reduce((s, l) => s + Number(l.qty || 0), 0)}{unit}
+          </div>
+          <div className="space-y-1.5">
+            {lots.map((l) => (
+              <div key={l.id} className="flex gap-2 items-center">
+                <input
+                  type="number" value={l.qty}
+                  onChange={(e) => updateLot(l.id, { qty: e.target.value })}
+                  className={inputCls} placeholder="Qty"
+                />
+                <input
+                  type="number" value={l.price}
+                  onChange={(e) => updateLot(l.id, { price: e.target.value })}
+                  className={inputCls} placeholder="₹/unit"
+                />
+                <button onClick={() => removeLot(l.id)} aria-label="Remove lot" className="shrink-0">
+                  <X size={16} className="text-zinc-400" />
+                </button>
+              </div>
+            ))}
+            {lots.length === 0 && (
+              <p className="text-xs text-zinc-500">No lots set up yet — add your current stock below, oldest first.</p>
+            )}
+          </div>
+          <div className="flex gap-2 mt-2">
+            <input placeholder="Qty" type="number" value={newLotQty} onChange={(e) => setNewLotQty(e.target.value)} className={inputCls} />
+            <input placeholder="₹/unit" type="number" value={newLotPrice} onChange={(e) => setNewLotPrice(e.target.value)} className={inputCls} />
+            <button onClick={addLot} className="px-3 rounded-lg text-xs font-semibold shrink-0" style={{ background: accent, color: "#ffffff" }}>
+              Add lot
+            </button>
+          </div>
+        </div>
+      )}
+
       <button onClick={submit} className="mt-3 w-full rounded-lg py-2 text-sm font-semibold" style={{ background: accent, color: "#ffffff" }}>
         Save changes
       </button>
@@ -406,7 +551,7 @@ function EditItemForm({ accent, item, canViewCosting, onSave, onClose }) {
   );
 }
 
-function MovementRow({ h, showItem }) {
+function MovementRow({ h, showItem, canViewCosting }) {
   const icon = h.type === "in" ? ArrowDownCircle : h.type === "out" ? ArrowUpCircle : Truck;
   const color = h.type === "in" ? "#2E9E5B" : h.type === "out" ? "#D1453B" : "#3E8E86";
   const Icon = icon;
@@ -417,6 +562,7 @@ function MovementRow({ h, showItem }) {
         <div className="text-xs text-zinc-600 truncate">
           {showItem && <span className="text-zinc-800 font-medium">{showItem} · </span>}
           {h.note || h.type}
+          {canViewCosting && h.priceNote ? ` · ${h.priceNote}` : ""}
         </div>
         <div className="text-[10px] text-zinc-400 flex items-center gap-1">
           <User size={9} /> {h.by || "Unknown"} · {fmtDate(h.date)}
@@ -433,20 +579,38 @@ function ItemCard({ item, accent, name, isBoss, canViewCosting, onUpdate, onDele
   const [open, setOpen] = useState(false);
   const [activeAction, setActiveAction] = useState(null);
   const [moveQty, setMoveQty] = useState("");
+  const [lotPrice, setLotPrice] = useState("");
   const [editing, setEditing] = useState(false);
   const low = item.qty <= item.threshold;
   const pct = item.threshold > 0 ? Math.min(100, (item.qty / (item.threshold * 2)) * 100) : 100;
+  const isRawWithLots = item.category === "Raw material" && item.lots && item.lots.length > 0;
 
   const move = (type) => {
     const q = Number(moveQty);
     if (!q || q <= 0) return;
-    const nextQty = type === "out" ? Math.max(0, item.qty - q) : item.qty + q;
-    onUpdate({
-      ...item,
-      qty: nextQty,
-      history: [{ id: uid(), type, qty: q, date: new Date().toISOString(), note: type === "in" ? "Stock in" : "Stock out", by: name }, ...item.history],
-    });
+
+    if (type === "in") {
+      const { qty: newQty, lots: newLots } = addStockInLot(item, q, canViewCosting ? lotPrice : "");
+      const priceNote = canViewCosting && lotPrice ? `₹${lotPrice}/${item.unit} (new lot)` : undefined;
+      onUpdate({
+        ...item,
+        qty: newQty,
+        lots: newLots,
+        costPerUnit: newLots ? avgCostOf({ ...item, lots: newLots }) : item.costPerUnit,
+        history: [{ id: uid(), type, qty: q, date: new Date().toISOString(), note: "Stock in", priceNote, by: name }, ...item.history],
+      });
+    } else {
+      const { newQty, newLots, unitCostUsed } = consumeMaterial(item, q);
+      const priceNote = canViewCosting && unitCostUsed ? `₹${unitCostUsed.toFixed(2)}/${item.unit} (FIFO)` : undefined;
+      onUpdate({
+        ...item,
+        qty: newQty,
+        lots: newLots,
+        history: [{ id: uid(), type, qty: q, date: new Date().toISOString(), note: "Stock out", priceNote, by: name }, ...item.history],
+      });
+    }
     setMoveQty("");
+    setLotPrice("");
     setActiveAction(null);
   };
 
@@ -468,11 +632,15 @@ function ItemCard({ item, accent, name, isBoss, canViewCosting, onUpdate, onDele
     if (activeAction === action) {
       setActiveAction(null);
       setMoveQty("");
+      setLotPrice("");
     } else {
       setActiveAction(action);
       setMoveQty("");
+      setLotPrice("");
     }
   };
+
+  const avg = avgCostOf(item);
 
   return (
     <div className="rounded-xl overflow-hidden" style={{ background: "#FFFFFF", border: `1px solid ${low ? "#D1453B55" : "#00000014"}` }}>
@@ -485,8 +653,10 @@ function ItemCard({ item, accent, name, isBoss, canViewCosting, onUpdate, onDele
             {item.shared && (
               <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full shrink-0" style={{ background: "#3E8E8618", color: "#3E8E86" }}>SHARED</span>
             )}
-            {canViewCosting && item.costPerUnit > 0 && (
-              <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full shrink-0" style={{ background: "#15583014", color: DARK_GREEN }}>₹{item.costPerUnit}/{item.unit}</span>
+            {canViewCosting && avg > 0 && (
+              <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full shrink-0" style={{ background: "#15583014", color: DARK_GREEN }}>
+                ₹{avg.toFixed(2)}/{item.unit}{isRawWithLots ? ` · ${item.lots.length} lot${item.lots.length > 1 ? "s" : ""}` : ""}
+              </span>
             )}
           </div>
         </div>
@@ -512,6 +682,20 @@ function ItemCard({ item, accent, name, isBoss, canViewCosting, onUpdate, onDele
             </div>
           )}
 
+          {canViewCosting && isRawWithLots && (
+            <div className="mt-3 rounded-lg px-3 py-2" style={{ background: "#F7F8F7" }}>
+              <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-zinc-400 mb-1.5"><Layers size={11} /> Lots (oldest first)</div>
+              <div className="space-y-1">
+                {item.lots.map((l) => (
+                  <div key={l.id} className="flex justify-between text-xs text-zinc-600">
+                    <span>{l.qty}{item.unit}</span>
+                    <span className="mono-font">₹{l.price}/{item.unit}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="flex gap-2 mt-3">
             <button onClick={() => toggleAction("in")} className="flex-1 flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-medium" style={{ background: activeAction === "in" ? "#2E9E5B2a" : "#2E9E5B15", color: "#2E9E5B" }}>
               <ArrowDownCircle size={13} /> Stock in
@@ -525,29 +709,42 @@ function ItemCard({ item, accent, name, isBoss, canViewCosting, onUpdate, onDele
           </div>
 
           {activeAction && (
-            <div className="flex gap-2 mt-2">
-              <input
-                autoFocus
-                placeholder={`Qty in ${item.unit}`}
-                type="number"
-                inputMode="decimal"
-                value={moveQty}
-                onChange={(e) => setMoveQty(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    if (activeAction === "reorder") logReorder();
-                    else move(activeAction);
-                  }
-                }}
-                className={inputCls}
-              />
-              <button
-                onClick={() => (activeAction === "reorder" ? logReorder() : move(activeAction))}
-                className="px-4 rounded-lg text-xs font-semibold shrink-0"
-                style={{ background: accent, color: "#ffffff" }}
-              >
-                Confirm
-              </button>
+            <div className="mt-2 space-y-2">
+              <div className="flex gap-2">
+                <input
+                  autoFocus
+                  placeholder={`Qty in ${item.unit}`}
+                  type="number"
+                  inputMode="decimal"
+                  value={moveQty}
+                  onChange={(e) => setMoveQty(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !(activeAction === "in" && canViewCosting && item.category === "Raw material")) {
+                      if (activeAction === "reorder") logReorder();
+                      else move(activeAction);
+                    }
+                  }}
+                  className={inputCls}
+                />
+                <button
+                  onClick={() => (activeAction === "reorder" ? logReorder() : move(activeAction))}
+                  className="px-4 rounded-lg text-xs font-semibold shrink-0"
+                  style={{ background: accent, color: "#ffffff" }}
+                >
+                  Confirm
+                </button>
+              </div>
+              {activeAction === "in" && canViewCosting && item.category === "Raw material" && (
+                <input
+                  placeholder={`Price for this lot, ₹/${item.unit} (blank = adds to most recent lot)`}
+                  type="number"
+                  inputMode="decimal"
+                  value={lotPrice}
+                  onChange={(e) => setLotPrice(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && move("in")}
+                  className={inputCls}
+                />
+              )}
             </div>
           )}
 
@@ -556,7 +753,7 @@ function ItemCard({ item, accent, name, isBoss, canViewCosting, onUpdate, onDele
             {item.history.length === 0 ? (
               <div className="text-xs text-zinc-400 py-1">No movements yet.</div>
             ) : (
-              item.history.slice(0, 8).map((h) => <MovementRow key={h.id} h={h} />)
+              item.history.slice(0, 8).map((h) => <MovementRow key={h.id} h={h} canViewCosting={canViewCosting} />)
             )}
           </div>
 
@@ -628,7 +825,7 @@ function BulkImportForm({ accent, name, onImport, onClose }) {
       </div>
       <p className="text-[10px] text-zinc-500 mb-2">
         One item per line: <span className="text-zinc-600">Name, Category, Qty, Unit, Reorder threshold</span><br />
-        Category must be exactly: Raw material / Packaging / Finished good
+        Category must be exactly: Raw material / Packaging / Finished good. Bulk-imported items don't get lot tracking — add lots later via Edit item if you want FIFO costing on them.
       </p>
       <textarea
         value={text}
@@ -669,18 +866,10 @@ function ProductionForm({ accent, name, rawMaterials, onSubmit, onClose }) {
       .filter((r) => r.itemId && r.qty)
       .map((r) => {
         const item = rawMaterials.find((m) => m.id === r.itemId);
-        return item ? { itemId: item.id, itemName: item.name, qty: Number(r.qty), unit: item.unit, costPerUnit: item.costPerUnit || 0 } : null;
+        return item ? { itemId: item.id, itemName: item.name, qty: Number(r.qty), unit: item.unit } : null;
       })
       .filter(Boolean);
     if (materials.length === 0) return;
-
-    const outQty = Number(outputQty);
-    const materialCost = materials.reduce((sum, m) => sum + m.qty * m.costPerUnit, 0);
-    const laborCost = materialCost * LABOR_RATE;
-    const canRate = canUsed === "old" ? CAN_RATES.old : canUsed === "new" ? CAN_RATES.new : 0;
-    const canCost = outQty * canRate;
-    const totalCost = materialCost + laborCost + canCost;
-    const costPerKg = outQty > 0 ? totalCost / outQty : 0;
 
     onSubmit({
       id: uid(),
@@ -688,11 +877,10 @@ function ProductionForm({ accent, name, rawMaterials, onSubmit, onClose }) {
       batchNumber: batchNumber.trim(),
       date,
       machineNumber: machineNumber.trim(),
-      outputQty: outQty,
+      outputQty: Number(outputQty),
       outputUnit,
       materials,
       canUsed,
-      costing: { materialCost, laborCost, canCost, totalCost, costPerKg },
       by: name,
       createdAt: new Date().toISOString(),
     });
@@ -796,7 +984,12 @@ function ProductionCard({ batch, accent, isBoss, canViewCosting, onDelete }) {
           <div className="space-y-1">
             {batch.materials.map((m, i) => (
               <div key={i} className="flex items-center justify-between text-xs">
-                <span className="text-zinc-600">{m.itemName}</span>
+                <span className="text-zinc-600">
+                  {m.itemName}
+                  {canViewCosting && m.unitCostUsed != null && (
+                    <span className="text-zinc-400"> (₹{m.unitCostUsed.toFixed(2)}/{m.unit})</span>
+                  )}
+                </span>
                 <span className="mono-font" style={{ color: "#D1453B" }}>−{m.qty}{m.unit}</span>
               </div>
             ))}
@@ -806,14 +999,20 @@ function ProductionCard({ batch, accent, isBoss, canViewCosting, onDelete }) {
             <div className="mt-3 rounded-lg px-3 py-2.5" style={{ background: "#F7F8F7" }}>
               <div className="text-[10px] uppercase tracking-wide text-zinc-400 mb-1.5">Costing</div>
               <div className="space-y-1 text-xs text-zinc-600">
-                <div className="flex justify-between"><span>Material cost</span><span className="mono-font">₹{batch.costing.materialCost.toFixed(2)}</span></div>
+                <div className="flex justify-between"><span>Material cost (FIFO)</span><span className="mono-font">₹{batch.costing.materialCost.toFixed(2)}</span></div>
                 <div className="flex justify-between"><span>Labor (15%)</span><span className="mono-font">₹{batch.costing.laborCost.toFixed(2)}</span></div>
                 <div className="flex justify-between"><span>Can / packaging</span><span className="mono-font">₹{batch.costing.canCost.toFixed(2)}</span></div>
                 <div className="flex justify-between font-semibold text-zinc-800 pt-1" style={{ borderTop: "1px solid #00000010" }}>
                   <span>Total cost</span><span className="mono-font">₹{batch.costing.totalCost.toFixed(2)}</span>
                 </div>
-                <div className="flex justify-between font-semibold" style={{ color: accent }}>
+                <div className="flex justify-between font-semibold">
                   <span>Cost / {batch.outputUnit}</span><span className="mono-font">₹{batch.costing.costPerKg.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between pt-1" style={{ borderTop: "1px solid #00000010" }}>
+                  <span>GST (18%)</span><span className="mono-font">₹{batch.costing.gstAmount.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between font-semibold" style={{ color: accent }}>
+                  <span>Cost / {batch.outputUnit} incl. GST</span><span className="mono-font">₹{batch.costing.costPerKgWithGst.toFixed(2)}</span>
                 </div>
               </div>
             </div>
@@ -904,22 +1103,49 @@ export default function App() {
   const bulkAddItems = (newItems) => save([...newItems, ...items]);
 
   const logProduction = (batch) => {
-    const consume = (list) =>
-      list.map((item) => {
-        const used = batch.materials.find((m) => m.itemId === item.id);
-        if (!used) return item;
-        return {
-          ...item,
-          qty: Math.max(0, item.qty - used.qty),
-          history: [
-            { id: uid(), type: "out", qty: used.qty, date: new Date().toISOString(), note: `Used in batch ${batch.batchNumber} (${batch.productName})`, by: batch.by },
-            ...item.history,
-          ],
-        };
-      });
+    let materialCost = 0;
+    const finalMaterials = [];
+    let nextItems = [...items];
+    let nextSharedItems = [...sharedItems];
 
-    let nextItems = consume(items);
-    const nextSharedItems = consume(sharedItems);
+    for (const m of batch.materials) {
+      const inBrandIdx = nextItems.findIndex((i) => i.id === m.itemId);
+      const inSharedIdx = nextSharedItems.findIndex((i) => i.id === m.itemId);
+      const list = inBrandIdx >= 0 ? nextItems : inSharedIdx >= 0 ? nextSharedItems : null;
+      const idx = inBrandIdx >= 0 ? inBrandIdx : inSharedIdx;
+      if (!list || idx < 0) continue;
+
+      const original = list[idx];
+      const { cost, newQty, newLots, unitCostUsed } = consumeMaterial(original, m.qty);
+      materialCost += cost;
+      finalMaterials.push({ ...m, unitCostUsed });
+
+      const updatedItem = {
+        ...original,
+        qty: newQty,
+        lots: newLots,
+        history: [
+          { id: uid(), type: "out", qty: m.qty, date: new Date().toISOString(), note: `Used in batch ${batch.batchNumber} (${batch.productName})`, priceNote: unitCostUsed ? `₹${unitCostUsed.toFixed(2)}/${m.unit}` : undefined, by: batch.by },
+          ...original.history,
+        ],
+      };
+      if (inBrandIdx >= 0) nextItems[idx] = updatedItem;
+      else nextSharedItems[idx] = updatedItem;
+    }
+
+    const laborCost = materialCost * LABOR_RATE;
+    const canRate = batch.canUsed === "old" ? CAN_RATES.old : batch.canUsed === "new" ? CAN_RATES.new : 0;
+    const canCost = batch.outputQty * canRate;
+    const totalCost = materialCost + laborCost + canCost;
+    const costPerKg = batch.outputQty > 0 ? totalCost / batch.outputQty : 0;
+    const gstAmount = totalCost * GST_RATE;
+    const costPerKgWithGst = batch.outputQty > 0 ? (totalCost + gstAmount) / batch.outputQty : 0;
+
+    const finalBatch = {
+      ...batch,
+      materials: finalMaterials,
+      costing: { materialCost, laborCost, canCost, totalCost, costPerKg, gstAmount, costPerKgWithGst },
+    };
 
     const existingFG = nextItems.find(
       (i) => i.category === "Finished good" && i.name.trim().toLowerCase() === batch.productName.trim().toLowerCase()
@@ -958,7 +1184,7 @@ export default function App() {
 
     save(nextItems);
     saveShared(nextSharedItems);
-    saveBatches([batch, ...batches]);
+    saveBatches([finalBatch, ...batches]);
   };
 
   const deleteBatch = (id) => {
@@ -1118,7 +1344,7 @@ export default function App() {
               <div>
                 {allHistory.map((h) => (
                   <div key={h.id + h.itemName}>
-                    <MovementRow h={h} showItem={h.itemName} />
+                    <MovementRow h={h} showItem={h.itemName} canViewCosting={canViewCosting} />
                   </div>
                 ))}
               </div>
