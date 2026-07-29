@@ -30,8 +30,8 @@ const UNITS = ["g", "kg", "ml", "L", "units", "drums", "cartons"];
 
 // Add/edit your team here. role "boss" can delete/edit items, "staff" cannot.
 const USERS = [
-  { name: "Satvik", pin: "8941", role: "boss" },
-  { name: "Ravi", pin: "2814", role: "staff" },
+  { name: "Satvik", pin: "8942", role: "boss" },
+  { name: "SCPL", pin: "8941", role: "staff" },
   { name: "Vijay", pin: "2314", role: "staff" },
   { name: "Jyoti", pin: "3214", role: "staff" },
 ];
