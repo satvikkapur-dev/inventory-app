@@ -31,7 +31,7 @@ const UNITS = ["g", "kg", "ml", "L", "units", "drums", "cartons"];
 // Add/edit your team here. role "boss" can delete/edit items, "staff" cannot.
 const USERS = [
   { name: "Satvik", pin: "8942", role: "boss" },
-  { name: "SCPL", pin: "8941", role: "staff" },
+  { name: "Scpl", pin: "8941", role: "staff" },
   { name: "Vijay", pin: "2314", role: "staff" },
   { name: "Jyoti", pin: "3214", role: "staff" },
 ];
@@ -85,6 +85,40 @@ function useInventory(brand) {
       await setDoc(doc(db, "inventory", brand), { items: next });
     } catch (e) {
       console.error("Failed to save inventory", e);
+    }
+  };
+
+  return { items, save, loading };
+}
+
+// Shared raw materials pool — used by both Rubber Div and Homecare, one stock number.
+function useSharedInventory() {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    const ref = doc(db, "inventory", "shared");
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        setItems(snap.exists() ? snap.data().items || [] : []);
+        setLoading(false);
+      },
+      (err) => {
+        console.error("Firestore read failed", err);
+        setLoading(false);
+      }
+    );
+    return () => unsub();
+  }, []);
+
+  const save = async (next) => {
+    setItems(next);
+    try {
+      await setDoc(doc(db, "inventory", "shared"), { items: next });
+    } catch (e) {
+      console.error("Failed to save shared inventory", e);
     }
   };
 
@@ -234,6 +268,7 @@ function ItemForm({ accent, name, onAdd, onClose }) {
   const [supplierName, setSupplierName] = useState("");
   const [supplierContact, setSupplierContact] = useState("");
   const [leadTime, setLeadTime] = useState("");
+  const [shared, setShared] = useState(false);
 
   const submit = () => {
     if (!nm.trim() || !qty || !threshold) return;
@@ -244,6 +279,7 @@ function ItemForm({ accent, name, onAdd, onClose }) {
       qty: Number(qty),
       unit,
       threshold: Number(threshold),
+      shared,
       supplier: {
         name: supplierName.trim(),
         contact: supplierContact.trim(),
@@ -275,6 +311,11 @@ function ItemForm({ accent, name, onAdd, onClose }) {
         </select>
         <div className="col-span-2"><input placeholder="Reorder below" type="number" value={threshold} onChange={(e) => setThreshold(e.target.value)} className={inputCls} /></div>
 
+        <label className="col-span-2 flex items-center gap-2 text-xs text-zinc-600 mt-1">
+          <input type="checkbox" checked={shared} onChange={(e) => setShared(e.target.checked)} className="w-3.5 h-3.5" />
+          Shared material — same stock used by both Rubber Div and Homecare
+        </label>
+
         <div className="col-span-2 text-[10px] uppercase tracking-wide text-zinc-400 mb-1 mt-1">Supplier (optional)</div>
         <div className="col-span-2"><input placeholder="Supplier name" value={supplierName} onChange={(e) => setSupplierName(e.target.value)} className={inputCls} /></div>
         <input placeholder="Phone / email" value={supplierContact} onChange={(e) => setSupplierContact(e.target.value)} className={inputCls} />
@@ -295,6 +336,7 @@ function EditItemForm({ accent, item, onSave, onClose }) {
   const [supplierName, setSupplierName] = useState(item.supplier?.name || "");
   const [supplierContact, setSupplierContact] = useState(item.supplier?.contact || "");
   const [leadTime, setLeadTime] = useState(item.supplier?.leadTime != null ? String(item.supplier.leadTime) : "");
+  const [shared, setShared] = useState(!!item.shared);
 
   const submit = () => {
     if (!nm.trim() || !threshold) return;
@@ -304,6 +346,7 @@ function EditItemForm({ accent, item, onSave, onClose }) {
       category,
       unit,
       threshold: Number(threshold),
+      shared,
       supplier: {
         name: supplierName.trim(),
         contact: supplierContact.trim(),
@@ -331,6 +374,11 @@ function EditItemForm({ accent, item, onSave, onClose }) {
           {UNITS.map((u) => <option key={u}>{u}</option>)}
         </select>
         <input placeholder="Reorder below" type="number" value={threshold} onChange={(e) => setThreshold(e.target.value)} className={inputCls} />
+
+        <label className="col-span-2 flex items-center gap-2 text-xs text-zinc-600 mt-1">
+          <input type="checkbox" checked={shared} onChange={(e) => setShared(e.target.checked)} className="w-3.5 h-3.5" />
+          Shared material — same stock used by both Rubber Div and Homecare
+        </label>
 
         <div className="col-span-2 text-[10px] uppercase tracking-wide text-zinc-400 mb-1 mt-1">Supplier (optional)</div>
         <div className="col-span-2"><input placeholder="Supplier name" value={supplierName} onChange={(e) => setSupplierName(e.target.value)} className={inputCls} /></div>
@@ -418,8 +466,11 @@ function ItemCard({ item, accent, name, isBoss, onUpdate, onDelete }) {
         <GaugeDot pct={pct} accent={low ? "#D1453B" : accent} />
         <div className="min-w-0 flex-1">
           <div className="text-sm font-medium text-zinc-900 truncate">{item.name}</div>
-          <div className="text-xs text-zinc-500 mt-0.5 truncate">
+          <div className="text-xs text-zinc-500 mt-0.5 truncate flex items-center gap-1">
             {item.category}{item.supplier?.name ? ` · ${item.supplier.name}` : ""}
+            {item.shared && (
+              <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full shrink-0" style={{ background: "#3E8E8618", color: "#3E8E86" }}>SHARED</span>
+            )}
           </div>
         </div>
         <span className="mono-font text-xs shrink-0" style={{ color: low ? "#D1453B" : "#27292E" }}>
@@ -736,6 +787,7 @@ export default function App() {
   const [showProdForm, setShowProdForm] = useState(false);
   const [filter, setFilter] = useState("All");
   const { items, save, loading } = useInventory(brand);
+  const { items: sharedItems, save: saveShared, loading: sharedLoading } = useSharedInventory();
   const { batches, save: saveBatches } = useProduction(brand);
   const { session, save: saveSession } = useSession();
   const { logins, record } = useLoginLog();
@@ -748,37 +800,71 @@ export default function App() {
     record(user.name, user.role);
   };
 
-  const lowStock = items.filter((i) => i.qty <= i.threshold);
-  const visible = filter === "All" ? items : filter === "Low stock" ? lowStock : items.filter((i) => i.category === filter);
-  const rawMaterials = items.filter((i) => i.category === "Raw material");
+  // Combined view: this brand's own items + the shared pool.
+  const combined = [...items, ...sharedItems];
+
+  const lowStock = combined.filter((i) => i.qty <= i.threshold);
+  const visible = filter === "All" ? combined : filter === "Low stock" ? lowStock : combined.filter((i) => i.category === filter);
+  const rawMaterials = combined.filter((i) => i.category === "Raw material");
 
   const allHistory = useMemo(() => {
     const rows = [];
-    items.forEach((i) => i.history.forEach((h) => rows.push({ ...h, itemName: i.name })));
+    combined.forEach((i) => i.history.forEach((h) => rows.push({ ...h, itemName: i.name })));
     return rows.sort((a, b) => new Date(b.date) - new Date(a.date));
-  }, [items]);
+  }, [items, sharedItems]);
 
-  const updateItem = (updated) => save(items.map((i) => (i.id === updated.id ? updated : i)));
+  // Route an update to whichever store the item currently lives in — moving it
+  // between stores if its "shared" flag changed.
+  const updateItem = (updated) => {
+    const inBrand = items.some((i) => i.id === updated.id);
+    const inShared = sharedItems.some((i) => i.id === updated.id);
+
+    if (updated.shared) {
+      if (inShared) {
+        saveShared(sharedItems.map((i) => (i.id === updated.id ? updated : i)));
+      } else if (inBrand) {
+        save(items.filter((i) => i.id !== updated.id));
+        saveShared([updated, ...sharedItems]);
+      }
+    } else {
+      if (inBrand) {
+        save(items.map((i) => (i.id === updated.id ? updated : i)));
+      } else if (inShared) {
+        saveShared(sharedItems.filter((i) => i.id !== updated.id));
+        save([updated, ...items]);
+      }
+    }
+  };
+
   const deleteItem = (id) => {
     if (!isBoss) return;
-    save(items.filter((i) => i.id !== id));
+    if (items.some((i) => i.id === id)) save(items.filter((i) => i.id !== id));
+    else if (sharedItems.some((i) => i.id === id)) saveShared(sharedItems.filter((i) => i.id !== id));
   };
-  const addItem = (item) => save([item, ...items]);
+
+  const addItem = (item) => {
+    if (item.shared) saveShared([item, ...sharedItems]);
+    else save([item, ...items]);
+  };
   const bulkAddItems = (newItems) => save([...newItems, ...items]);
 
   const logProduction = (batch) => {
-    let nextItems = items.map((item) => {
-      const used = batch.materials.find((m) => m.itemId === item.id);
-      if (!used) return item;
-      return {
-        ...item,
-        qty: Math.max(0, item.qty - used.qty),
-        history: [
-          { id: uid(), type: "out", qty: used.qty, date: new Date().toISOString(), note: `Used in batch ${batch.batchNumber} (${batch.productName})`, by: batch.by },
-          ...item.history,
-        ],
-      };
-    });
+    const consume = (list) =>
+      list.map((item) => {
+        const used = batch.materials.find((m) => m.itemId === item.id);
+        if (!used) return item;
+        return {
+          ...item,
+          qty: Math.max(0, item.qty - used.qty),
+          history: [
+            { id: uid(), type: "out", qty: used.qty, date: new Date().toISOString(), note: `Used in batch ${batch.batchNumber} (${batch.productName})`, by: batch.by },
+            ...item.history,
+          ],
+        };
+      });
+
+    let nextItems = consume(items);
+    const nextSharedItems = consume(sharedItems);
 
     const existingFG = nextItems.find(
       (i) => i.category === "Finished good" && i.name.trim().toLowerCase() === batch.productName.trim().toLowerCase()
@@ -816,6 +902,7 @@ export default function App() {
     }
 
     save(nextItems);
+    saveShared(nextSharedItems);
     saveBatches([batch, ...batches]);
   };
 
@@ -913,7 +1000,7 @@ export default function App() {
       )}
 
       <div className="px-4 py-4 pb-24">
-        {loading ? (
+        {loading || sharedLoading ? (
           <div className="text-center text-zinc-400 text-sm py-10">Loading…</div>
         ) : tab === "items" ? (
           <>
@@ -930,9 +1017,9 @@ export default function App() {
               <div className="text-center py-14">
                 <Package size={28} className="mx-auto text-zinc-300 mb-2" />
                 <p className="text-sm text-zinc-500">
-                  {items.length === 0 ? `No inventory tracked for ${meta.label} yet.` : "Nothing matches this filter."}
+                  {combined.length === 0 ? `No inventory tracked for ${meta.label} yet.` : "Nothing matches this filter."}
                 </p>
-                {items.length === 0 && <p className="text-xs text-zinc-400 mt-1">Tap + to add your first item.</p>}
+                {combined.length === 0 && <p className="text-xs text-zinc-400 mt-1">Tap + to add your first item.</p>}
               </div>
             )}
             <div className="space-y-2">
