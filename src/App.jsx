@@ -43,6 +43,23 @@ function uid() {
   return Math.random().toString(36).slice(2, 10);
 }
 
+// Firestore rejects any value that's explicitly "undefined" (as opposed to
+// missing or null) and the whole write silently fails. This strips undefined
+// out of anything before it's saved, so a stray undefined anywhere in the
+// app can never again cause a save to quietly fail.
+function sanitize(value) {
+  if (Array.isArray(value)) return value.map(sanitize);
+  if (value && typeof value === "object") {
+    const out = {};
+    for (const k in value) {
+      const v = value[k];
+      if (v !== undefined) out[k] = sanitize(v);
+    }
+    return out;
+  }
+  return value;
+}
+
 function fmtDate(iso) {
   const d = new Date(iso);
   return d.toLocaleDateString(undefined, { day: "numeric", month: "short" }) + " · " +
@@ -116,19 +133,9 @@ function consumeMaterial(item, qtyNeeded) {
 // to the most recent lot at its existing price (or a zero-price lot if none exist).
 function addStockInLot(item, qty, price) {
   if (item.category !== "Raw material") {
-    return { qty: item.qty + qty, lots: item.lots };
+    return { qty: item.qty + qty, lots: item.lots || null };
   }
   let lots = item.lots ? [...item.lots] : [];
-  // If this item has existing stock but no lots yet, seed an "opening" lot so
-  // we don't silently lose track of stock that predates lot tracking.
-  if (lots.length === 0 && item.qty > 0) {
-    lots.push({
-      id: uid(),
-      qty: item.qty,
-      price: item.costPerUnit || 0,
-      date: new Date().toISOString(),
-    });
-  }
   if (price) {
     lots.push({ id: uid(), qty, price: Number(price), date: new Date().toISOString() });
   } else if (lots.length > 0) {
@@ -141,6 +148,7 @@ function addStockInLot(item, qty, price) {
   const newQty = lots.reduce((s, l) => s + l.qty, 0);
   return { qty: newQty, lots };
 }
+
 function Wordmark({ size = "text-lg" }) {
   return (
     <span className={`font-bold tracking-tight ${size}`} style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
@@ -173,7 +181,7 @@ function useInventory(brand) {
   const save = async (next) => {
     setItems(next);
     try {
-      await setDoc(doc(db, "inventory", brand), { items: next });
+      await setDoc(doc(db, "inventory", brand), { items: sanitize(next) });
     } catch (e) {
       console.error("Failed to save inventory", e);
     }
@@ -207,7 +215,7 @@ function useSharedInventory() {
   const save = async (next) => {
     setItems(next);
     try {
-      await setDoc(doc(db, "inventory", "shared"), { items: next });
+      await setDoc(doc(db, "inventory", "shared"), { items: sanitize(next) });
     } catch (e) {
       console.error("Failed to save shared inventory", e);
     }
@@ -230,7 +238,7 @@ function useProduction(brand) {
   const save = async (next) => {
     setBatches(next);
     try {
-      await setDoc(doc(db, "production", brand), { batches: next });
+      await setDoc(doc(db, "production", brand), { batches: sanitize(next) });
     } catch (e) {
       console.error("Failed to save production log", e);
     }
@@ -376,7 +384,7 @@ function ItemForm({ accent, name, canViewCosting, onAdd, onClose }) {
       threshold: Number(threshold),
       shared,
       costPerUnit: price,
-      lots: isRaw && price ? [{ id: uid(), qty: q, price, date: new Date().toISOString() }] : undefined,
+      lots: isRaw && price ? [{ id: uid(), qty: q, price, date: new Date().toISOString() }] : null,
       supplier: {
         name: supplierName.trim(),
         contact: supplierContact.trim(),
@@ -472,7 +480,7 @@ function EditItemForm({ accent, item, canViewCosting, onSave, onClose }) {
       shared,
       qty: usingLots ? totalLotQty : item.qty,
       costPerUnit: costPerUnit ? Number(costPerUnit) : item.costPerUnit || 0,
-      lots: showLots ? lots.map((l) => ({ ...l, qty: Number(l.qty), price: Number(l.price) })) : item.lots,
+      lots: showLots ? lots.map((l) => ({ ...l, qty: Number(l.qty), price: Number(l.price) })) : (item.lots || null),
       supplier: {
         name: supplierName.trim(),
         contact: supplierContact.trim(),
@@ -600,17 +608,17 @@ function ItemCard({ item, accent, name, isBoss, canViewCosting, onUpdate, onDele
 
     if (type === "in") {
       const { qty: newQty, lots: newLots } = addStockInLot(item, q, canViewCosting ? lotPrice : "");
-      const priceNote = canViewCosting && lotPrice ? `₹${lotPrice}/${item.unit} (new lot)` : undefined;
+      const priceNote = canViewCosting && lotPrice ? `₹${lotPrice}/${item.unit} (new lot)` : null;
       onUpdate({
         ...item,
         qty: newQty,
         lots: newLots,
-        costPerUnit: newLots ? avgCostOf({ ...item, lots: newLots }) : item.costPerUnit,
+        costPerUnit: newLots ? avgCostOf({ ...item, lots: newLots }) : (item.costPerUnit || 0),
         history: [{ id: uid(), type, qty: q, date: new Date().toISOString(), note: "Stock in", priceNote, by: name }, ...item.history],
       });
     } else {
       const { newQty, newLots, unitCostUsed } = consumeMaterial(item, q);
-      const priceNote = canViewCosting && unitCostUsed ? `₹${unitCostUsed.toFixed(2)}/${item.unit} (FIFO)` : undefined;
+      const priceNote = canViewCosting && unitCostUsed ? `₹${unitCostUsed.toFixed(2)}/${item.unit} (FIFO)` : null;
       onUpdate({
         ...item,
         qty: newQty,
@@ -991,7 +999,7 @@ function ProductionCard({ batch, accent, isBoss, canViewCosting, onDelete }) {
         <div className="px-3.5 pb-3.5" style={{ borderTop: "1px solid #00000010" }}>
           <div className="mt-3 text-[10px] uppercase tracking-wide text-zinc-400 mb-1">Materials consumed</div>
           <div className="space-y-1">
-            {batch.materials.map((m, i) => (
+            {(batch.materials || []).map((m, i) => (
               <div key={i} className="flex items-center justify-between text-xs">
                 <span className="text-zinc-600">
                   {m.itemName}
@@ -1008,20 +1016,20 @@ function ProductionCard({ batch, accent, isBoss, canViewCosting, onDelete }) {
             <div className="mt-3 rounded-lg px-3 py-2.5" style={{ background: "#F7F8F7" }}>
               <div className="text-[10px] uppercase tracking-wide text-zinc-400 mb-1.5">Costing</div>
               <div className="space-y-1 text-xs text-zinc-600">
-                <div className="flex justify-between"><span>Material cost (FIFO)</span><span className="mono-font">₹{batch.costing.materialCost.toFixed(2)}</span></div>
-                <div className="flex justify-between"><span>Labor (15%)</span><span className="mono-font">₹{batch.costing.laborCost.toFixed(2)}</span></div>
-                <div className="flex justify-between"><span>Can / packaging</span><span className="mono-font">₹{batch.costing.canCost.toFixed(2)}</span></div>
+                <div className="flex justify-between"><span>Material cost (FIFO)</span><span className="mono-font">₹{(batch.costing.materialCost || 0).toFixed(2)}</span></div>
+                <div className="flex justify-between"><span>Labor (15%)</span><span className="mono-font">₹{(batch.costing.laborCost || 0).toFixed(2)}</span></div>
+                <div className="flex justify-between"><span>Can / packaging</span><span className="mono-font">₹{(batch.costing.canCost || 0).toFixed(2)}</span></div>
                 <div className="flex justify-between font-semibold text-zinc-800 pt-1" style={{ borderTop: "1px solid #00000010" }}>
-                  <span>Total cost</span><span className="mono-font">₹{batch.costing.totalCost.toFixed(2)}</span>
+                  <span>Total cost</span><span className="mono-font">₹{(batch.costing.totalCost || 0).toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between font-semibold">
-                  <span>Cost / {batch.outputUnit}</span><span className="mono-font">₹{batch.costing.costPerKg.toFixed(2)}</span>
+                  <span>Cost / {batch.outputUnit}</span><span className="mono-font">₹{(batch.costing.costPerKg || 0).toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between pt-1" style={{ borderTop: "1px solid #00000010" }}>
-                  <span>GST (18%)</span><span className="mono-font">₹{batch.costing.gstAmount.toFixed(2)}</span>
+                  <span>GST (18%)</span><span className="mono-font">₹{(batch.costing.gstAmount != null ? batch.costing.gstAmount : (batch.costing.totalCost || 0) * GST_RATE).toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between font-semibold" style={{ color: accent }}>
-                  <span>Cost / {batch.outputUnit} incl. GST</span><span className="mono-font">₹{batch.costing.costPerKgWithGst.toFixed(2)}</span>
+                  <span>Cost / {batch.outputUnit} incl. GST</span><span className="mono-font">₹{(batch.costing.costPerKgWithGst != null ? batch.costing.costPerKgWithGst : ((batch.costing.totalCost || 0) * (1 + GST_RATE)) / (batch.outputQty || 1)).toFixed(2)}</span>
                 </div>
               </div>
             </div>
@@ -1134,7 +1142,7 @@ export default function App() {
         qty: newQty,
         lots: newLots,
         history: [
-          { id: uid(), type: "out", qty: m.qty, date: new Date().toISOString(), note: `Used in batch ${batch.batchNumber} (${batch.productName})`, priceNote: unitCostUsed ? `₹${unitCostUsed.toFixed(2)}/${m.unit}` : undefined, by: batch.by },
+          { id: uid(), type: "out", qty: m.qty, date: new Date().toISOString(), note: `Used in batch ${batch.batchNumber} (${batch.productName})`, priceNote: unitCostUsed ? `₹${unitCostUsed.toFixed(2)}/${m.unit}` : null, by: batch.by },
           ...original.history,
         ],
       };
