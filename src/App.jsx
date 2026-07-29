@@ -27,13 +27,15 @@ const BRANDS = {
 
 const CATEGORIES = ["Raw material", "Packaging", "Finished good"];
 const UNITS = ["g", "kg", "ml", "L", "units", "drums", "cartons"];
+const LABOR_RATE = 0.15; // 15% of material cost
+const CAN_RATES = { old: 3.5, new: 6 }; // ₹ per kg of output
 
 // Add/edit your team here. role "boss" can delete/edit items, "staff" cannot.
 const USERS = [
-  { name: "Satvik", pin: "8942", role: "boss" },
-  { name: "Scpl", pin: "8941", role: "staff" },
-  { name: "Vijay", pin: "2314", role: "staff" },
-  { name: "Jyoti", pin: "3214", role: "staff" },
+  { name: "Satvik", pin: "8942", role: "boss", canViewCosting: true },
+  { name: "SCPL", pin: "8941", role: "staff", canViewCosting: true },
+  { name: "Vijay", pin: "2314", role: "staff", canViewCosting: false },
+  { name: "Jyoti", pin: "3214", role: "staff", canViewCosting: false },
 ];
 
 function uid() {
@@ -259,7 +261,7 @@ function PinGate({ onLogin }) {
   );
 }
 
-function ItemForm({ accent, name, onAdd, onClose }) {
+function ItemForm({ accent, name, canViewCosting, onAdd, onClose }) {
   const [nm, setNm] = useState("");
   const [category, setCategory] = useState("Raw material");
   const [qty, setQty] = useState("");
@@ -269,6 +271,7 @@ function ItemForm({ accent, name, onAdd, onClose }) {
   const [supplierContact, setSupplierContact] = useState("");
   const [leadTime, setLeadTime] = useState("");
   const [shared, setShared] = useState(false);
+  const [costPerUnit, setCostPerUnit] = useState("");
 
   const submit = () => {
     if (!nm.trim() || !qty || !threshold) return;
@@ -280,6 +283,7 @@ function ItemForm({ accent, name, onAdd, onClose }) {
       unit,
       threshold: Number(threshold),
       shared,
+      costPerUnit: costPerUnit ? Number(costPerUnit) : 0,
       supplier: {
         name: supplierName.trim(),
         contact: supplierContact.trim(),
@@ -311,6 +315,10 @@ function ItemForm({ accent, name, onAdd, onClose }) {
         </select>
         <div className="col-span-2"><input placeholder="Reorder below" type="number" value={threshold} onChange={(e) => setThreshold(e.target.value)} className={inputCls} /></div>
 
+        {canViewCosting && (
+          <div className="col-span-2"><input placeholder="Cost per unit (₹)" type="number" value={costPerUnit} onChange={(e) => setCostPerUnit(e.target.value)} className={inputCls} /></div>
+        )}
+
         <label className="col-span-2 flex items-center gap-2 text-xs text-zinc-600 mt-1">
           <input type="checkbox" checked={shared} onChange={(e) => setShared(e.target.checked)} className="w-3.5 h-3.5" />
           Shared material — same stock used by both Rubber Div and Homecare
@@ -328,7 +336,7 @@ function ItemForm({ accent, name, onAdd, onClose }) {
   );
 }
 
-function EditItemForm({ accent, item, onSave, onClose }) {
+function EditItemForm({ accent, item, canViewCosting, onSave, onClose }) {
   const [nm, setNm] = useState(item.name);
   const [category, setCategory] = useState(item.category);
   const [unit, setUnit] = useState(item.unit);
@@ -337,6 +345,7 @@ function EditItemForm({ accent, item, onSave, onClose }) {
   const [supplierContact, setSupplierContact] = useState(item.supplier?.contact || "");
   const [leadTime, setLeadTime] = useState(item.supplier?.leadTime != null ? String(item.supplier.leadTime) : "");
   const [shared, setShared] = useState(!!item.shared);
+  const [costPerUnit, setCostPerUnit] = useState(item.costPerUnit != null ? String(item.costPerUnit) : "");
 
   const submit = () => {
     if (!nm.trim() || !threshold) return;
@@ -347,6 +356,7 @@ function EditItemForm({ accent, item, onSave, onClose }) {
       unit,
       threshold: Number(threshold),
       shared,
+      costPerUnit: costPerUnit ? Number(costPerUnit) : 0,
       supplier: {
         name: supplierName.trim(),
         contact: supplierContact.trim(),
@@ -374,6 +384,10 @@ function EditItemForm({ accent, item, onSave, onClose }) {
           {UNITS.map((u) => <option key={u}>{u}</option>)}
         </select>
         <input placeholder="Reorder below" type="number" value={threshold} onChange={(e) => setThreshold(e.target.value)} className={inputCls} />
+
+        {canViewCosting && (
+          <div className="col-span-2"><input placeholder="Cost per unit (₹)" type="number" value={costPerUnit} onChange={(e) => setCostPerUnit(e.target.value)} className={inputCls} /></div>
+        )}
 
         <label className="col-span-2 flex items-center gap-2 text-xs text-zinc-600 mt-1">
           <input type="checkbox" checked={shared} onChange={(e) => setShared(e.target.checked)} className="w-3.5 h-3.5" />
@@ -415,7 +429,7 @@ function MovementRow({ h, showItem }) {
   );
 }
 
-function ItemCard({ item, accent, name, isBoss, onUpdate, onDelete }) {
+function ItemCard({ item, accent, name, isBoss, canViewCosting, onUpdate, onDelete }) {
   const [open, setOpen] = useState(false);
   const [activeAction, setActiveAction] = useState(null);
   const [moveQty, setMoveQty] = useState("");
@@ -470,6 +484,9 @@ function ItemCard({ item, accent, name, isBoss, onUpdate, onDelete }) {
             {item.category}{item.supplier?.name ? ` · ${item.supplier.name}` : ""}
             {item.shared && (
               <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full shrink-0" style={{ background: "#3E8E8618", color: "#3E8E86" }}>SHARED</span>
+            )}
+            {canViewCosting && item.costPerUnit > 0 && (
+              <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full shrink-0" style={{ background: "#15583014", color: DARK_GREEN }}>₹{item.costPerUnit}/{item.unit}</span>
             )}
           </div>
         </div>
@@ -558,6 +575,7 @@ function ItemCard({ item, accent, name, isBoss, onUpdate, onDelete }) {
             <EditItemForm
               accent={accent}
               item={item}
+              canViewCosting={canViewCosting}
               onClose={() => setEditing(false)}
               onSave={(updated) => onUpdate(updated)}
             />
@@ -638,6 +656,7 @@ function ProductionForm({ accent, name, rawMaterials, onSubmit, onClose }) {
   const [machineNumber, setMachineNumber] = useState("");
   const [outputQty, setOutputQty] = useState("");
   const [outputUnit, setOutputUnit] = useState("kg");
+  const [canUsed, setCanUsed] = useState("none");
   const [rows, setRows] = useState([{ id: uid(), itemId: "", qty: "" }]);
 
   const addRow = () => setRows([...rows, { id: uid(), itemId: "", qty: "" }]);
@@ -650,10 +669,18 @@ function ProductionForm({ accent, name, rawMaterials, onSubmit, onClose }) {
       .filter((r) => r.itemId && r.qty)
       .map((r) => {
         const item = rawMaterials.find((m) => m.id === r.itemId);
-        return item ? { itemId: item.id, itemName: item.name, qty: Number(r.qty), unit: item.unit } : null;
+        return item ? { itemId: item.id, itemName: item.name, qty: Number(r.qty), unit: item.unit, costPerUnit: item.costPerUnit || 0 } : null;
       })
       .filter(Boolean);
     if (materials.length === 0) return;
+
+    const outQty = Number(outputQty);
+    const materialCost = materials.reduce((sum, m) => sum + m.qty * m.costPerUnit, 0);
+    const laborCost = materialCost * LABOR_RATE;
+    const canRate = canUsed === "old" ? CAN_RATES.old : canUsed === "new" ? CAN_RATES.new : 0;
+    const canCost = outQty * canRate;
+    const totalCost = materialCost + laborCost + canCost;
+    const costPerKg = outQty > 0 ? totalCost / outQty : 0;
 
     onSubmit({
       id: uid(),
@@ -661,9 +688,11 @@ function ProductionForm({ accent, name, rawMaterials, onSubmit, onClose }) {
       batchNumber: batchNumber.trim(),
       date,
       machineNumber: machineNumber.trim(),
-      outputQty: Number(outputQty),
+      outputQty: outQty,
       outputUnit,
       materials,
+      canUsed,
+      costing: { materialCost, laborCost, canCost, totalCost, costPerKg },
       by: name,
       createdAt: new Date().toISOString(),
     });
@@ -686,6 +715,13 @@ function ProductionForm({ accent, name, rawMaterials, onSubmit, onClose }) {
           <input placeholder="Output qty" type="number" value={outputQty} onChange={(e) => setOutputQty(e.target.value)} className={inputCls} />
           <select value={outputUnit} onChange={(e) => setOutputUnit(e.target.value)} className={inputCls} style={{ maxWidth: "5.5rem" }}>
             {UNITS.map((u) => <option key={u}>{u}</option>)}
+          </select>
+        </div>
+        <div className="col-span-2">
+          <select value={canUsed} onChange={(e) => setCanUsed(e.target.value)} className={inputCls}>
+            <option value="none">No can / not applicable</option>
+            <option value="old">Old can (₹{CAN_RATES.old}/kg)</option>
+            <option value="new">New can (₹{CAN_RATES.new}/kg)</option>
           </select>
         </div>
       </div>
@@ -739,7 +775,7 @@ function ProductionForm({ accent, name, rawMaterials, onSubmit, onClose }) {
   );
 }
 
-function ProductionCard({ batch, accent, isBoss, onDelete }) {
+function ProductionCard({ batch, accent, isBoss, canViewCosting, onDelete }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="rounded-xl overflow-hidden" style={{ background: "#FFFFFF", border: "1px solid #00000014" }}>
@@ -765,6 +801,24 @@ function ProductionCard({ batch, accent, isBoss, onDelete }) {
               </div>
             ))}
           </div>
+
+          {canViewCosting && batch.costing && (
+            <div className="mt-3 rounded-lg px-3 py-2.5" style={{ background: "#F7F8F7" }}>
+              <div className="text-[10px] uppercase tracking-wide text-zinc-400 mb-1.5">Costing</div>
+              <div className="space-y-1 text-xs text-zinc-600">
+                <div className="flex justify-between"><span>Material cost</span><span className="mono-font">₹{batch.costing.materialCost.toFixed(2)}</span></div>
+                <div className="flex justify-between"><span>Labor (15%)</span><span className="mono-font">₹{batch.costing.laborCost.toFixed(2)}</span></div>
+                <div className="flex justify-between"><span>Can / packaging</span><span className="mono-font">₹{batch.costing.canCost.toFixed(2)}</span></div>
+                <div className="flex justify-between font-semibold text-zinc-800 pt-1" style={{ borderTop: "1px solid #00000010" }}>
+                  <span>Total cost</span><span className="mono-font">₹{batch.costing.totalCost.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between font-semibold" style={{ color: accent }}>
+                  <span>Cost / {batch.outputUnit}</span><span className="mono-font">₹{batch.costing.costPerKg.toFixed(2)}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="text-[10px] text-zinc-400 flex items-center gap-1 mt-3">
             <User size={9} /> Logged by {batch.by} · {fmtDate(batch.createdAt)}
           </div>
@@ -794,9 +848,10 @@ export default function App() {
   const meta = BRANDS[brand];
 
   const isBoss = session?.role === "boss";
+  const canViewCosting = !!session?.canViewCosting;
 
   const handleLogin = (user) => {
-    saveSession({ name: user.name, role: user.role });
+    saveSession({ name: user.name, role: user.role, canViewCosting: !!user.canViewCosting });
     record(user.name, user.role);
   };
 
@@ -1012,7 +1067,7 @@ export default function App() {
                 onImport={bulkAddItems}
               />
             )}
-            {showForm && <ItemForm accent={meta.accent} name={session.name} onClose={() => setShowForm(false)} onAdd={addItem} />}
+            {showForm && <ItemForm accent={meta.accent} name={session.name} canViewCosting={canViewCosting} onClose={() => setShowForm(false)} onAdd={addItem} />}
             {visible.length === 0 && !showForm && (
               <div className="text-center py-14">
                 <Package size={28} className="mx-auto text-zinc-300 mb-2" />
@@ -1024,7 +1079,7 @@ export default function App() {
             )}
             <div className="space-y-2">
               {visible.map((item) => (
-                <ItemCard key={item.id} item={item} accent={meta.accent} name={session.name} isBoss={isBoss} onUpdate={updateItem} onDelete={deleteItem} />
+                <ItemCard key={item.id} item={item} accent={meta.accent} name={session.name} isBoss={isBoss} canViewCosting={canViewCosting} onUpdate={updateItem} onDelete={deleteItem} />
               ))}
             </div>
           </>
@@ -1048,7 +1103,7 @@ export default function App() {
             )}
             <div className="space-y-2">
               {batches.map((batch) => (
-                <ProductionCard key={batch.id} batch={batch} accent={meta.accent} isBoss={isBoss} onDelete={deleteBatch} />
+                <ProductionCard key={batch.id} batch={batch} accent={meta.accent} isBoss={isBoss} canViewCosting={canViewCosting} onDelete={deleteBatch} />
               ))}
             </div>
           </>
