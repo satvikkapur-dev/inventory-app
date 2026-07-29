@@ -119,6 +119,16 @@ function addStockInLot(item, qty, price) {
     return { qty: item.qty + qty, lots: item.lots };
   }
   let lots = item.lots ? [...item.lots] : [];
+  // If this item has existing stock but no lots yet, seed an "opening" lot so
+  // we don't silently lose track of stock that predates lot tracking.
+  if (lots.length === 0 && item.qty > 0) {
+    lots.push({
+      id: uid(),
+      qty: item.qty,
+      price: item.costPerUnit || 0,
+      date: new Date().toISOString(),
+    });
+  }
   if (price) {
     lots.push({ id: uid(), qty, price: Number(price), date: new Date().toISOString() });
   } else if (lots.length > 0) {
@@ -131,7 +141,6 @@ function addStockInLot(item, qty, price) {
   const newQty = lots.reduce((s, l) => s + l.qty, 0);
   return { qty: newQty, lots };
 }
-
 function Wordmark({ size = "text-lg" }) {
   return (
     <span className={`font-bold tracking-tight ${size}`} style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
