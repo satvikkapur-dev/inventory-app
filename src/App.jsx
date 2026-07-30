@@ -6,6 +6,9 @@ import {
   Truck, Clock, ArrowDownCircle, ArrowUpCircle, RotateCcw, User, History as HistoryIcon,
   Shield, LogIn, Pencil, Factory, UploadCloud, Layers, ShoppingCart, LayoutDashboard, TrendingUp,
 } from "lucide-react";
+import {
+  ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+} from "recharts";
 
 const DARK_GREEN = "#155830";
 const LIGHT_GREEN = "#59A249";
@@ -43,10 +46,6 @@ function uid() {
   return Math.random().toString(36).slice(2, 10);
 }
 
-// Firestore rejects any value that's explicitly "undefined" (as opposed to
-// missing or null) and the whole write silently fails. This strips undefined
-// out of anything before it's saved, so a stray undefined anywhere in the
-// app can never again cause a save to quietly fail.
 function sanitize(value) {
   if (Array.isArray(value)) return value.map(sanitize);
   if (value && typeof value === "object") {
@@ -70,10 +69,6 @@ function todayStr() {
   return new Date().toISOString().slice(0, 10);
 }
 
-// ---- FIFO lot helpers ----
-
-// Weighted average cost across an item's lots (falls back to legacy costPerUnit
-// for items that haven't been migrated to lot tracking yet).
 function avgCostOf(item) {
   if (item.lots && item.lots.length > 0) {
     const totalQty = item.lots.reduce((s, l) => s + l.qty, 0);
@@ -83,8 +78,6 @@ function avgCostOf(item) {
   return item.costPerUnit || 0;
 }
 
-// Consume qtyNeeded from the oldest lots first. Returns cost consumed, the
-// remaining lots, and any shortfall (qty that couldn't be found in lots).
 function consumeLotsFIFO(lots, qtyNeeded) {
   let remaining = qtyNeeded;
   let cost = 0;
@@ -97,7 +90,6 @@ function consumeLotsFIFO(lots, qtyNeeded) {
     if (lot.qty <= remaining) {
       cost += lot.qty * lot.price;
       remaining -= lot.qty;
-      // lot fully used up, dropped from the list
     } else {
       cost += remaining * lot.price;
       newLots.push({ ...lot, qty: lot.qty - remaining });
@@ -107,8 +99,6 @@ function consumeLotsFIFO(lots, qtyNeeded) {
   return { cost, remainingLots: newLots, shortfall: Math.max(0, remaining) };
 }
 
-// Consume qty from an item (production use or manual stock-out). Works with
-// real FIFO lots if present, otherwise falls back to the flat legacy cost.
 function consumeMaterial(item, qtyNeeded) {
   if (item.lots && item.lots.length > 0) {
     const { cost, remainingLots, shortfall } = consumeLotsFIFO(item.lots, qtyNeeded);
@@ -129,8 +119,6 @@ function consumeMaterial(item, qtyNeeded) {
   };
 }
 
-// Add stock at a given price (creates a new lot). If no price is given, adds
-// to the most recent lot at its existing price (or a zero-price lot if none exist).
 function addStockInLot(item, qty, price) {
   if (item.category !== "Raw material") {
     return { qty: item.qty + qty, lots: item.lots || null };
@@ -190,7 +178,6 @@ function useInventory(brand) {
   return { items, save, loading };
 }
 
-// Shared raw materials pool — used by both Rubber Div and Homecare, one stock number.
 function useSharedInventory() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1192,9 +1179,30 @@ function Dashboard({ meta, items, batches, sales, canViewCosting }) {
   sales.forEach((x) => {
     revenueByProduct[x.productName] = (revenueByProduct[x.productName] || 0) + x.totalAmount;
   });
-  const topProducts = Object.entries(revenueByProduct).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  const topProducts = Object.entries(revenueByProduct).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  const topProductsChart = topProducts.map(([name, revenue]) => ({ name, revenue }));
+
+  const outputByDate = {};
+  batches.forEach((b) => {
+    outputByDate[b.date] = (outputByDate[b.date] || 0) + (b.outputQty || 0);
+  });
+  const productionChart = Object.entries(outputByDate)
+    .map(([date, output]) => ({ date, output }))
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  const revenueByDate = {};
+  sales.forEach((s) => {
+    revenueByDate[s.date] = (revenueByDate[s.date] || 0) + (s.totalAmount || 0);
+  });
+  const salesChart = Object.entries(revenueByDate)
+    .map(([date, revenue]) => ({ date, revenue }))
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
 
   const cardStyle = { background: "#FFFFFF", border: "1px solid #00000014" };
+  const shortDate = (d) => {
+    const dt = new Date(d);
+    return dt.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  };
 
   return (
     <div className="space-y-3">
@@ -1235,7 +1243,7 @@ function Dashboard({ meta, items, batches, sales, canViewCosting }) {
         <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-zinc-400 mb-2">
           <Factory size={12} /> Production
         </div>
-        <div className="grid grid-cols-2 gap-2 text-center">
+        <div className="grid grid-cols-2 gap-2 text-center mb-2">
           <div>
             <div className="text-lg font-bold text-zinc-900">{batches.length}</div>
             <div className="text-[10px] text-zinc-500">Batches logged</div>
@@ -1246,10 +1254,29 @@ function Dashboard({ meta, items, batches, sales, canViewCosting }) {
           </div>
         </div>
         {canViewCosting && (
-          <div className="mt-2 pt-2 text-center" style={{ borderTop: "1px solid #00000010" }}>
+          <div className="pb-2 text-center">
             <div className="text-sm font-semibold" style={{ color: meta.accent }}>₹{totalProdCost.toFixed(2)}</div>
             <div className="text-[10px] text-zinc-500">Total production cost</div>
           </div>
+        )}
+        {productionChart.length > 0 ? (
+          <div style={{ width: "100%", height: 160 }}>
+            <ResponsiveContainer>
+              <BarChart data={productionChart} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#00000010" vertical={false} />
+                <XAxis dataKey="date" tickFormatter={shortDate} tick={{ fontSize: 10, fill: "#9CA3AF" }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 10, fill: "#9CA3AF" }} axisLine={false} tickLine={false} width={36} />
+                <Tooltip
+                  labelFormatter={shortDate}
+                  formatter={(v) => [`${v} kg`, "Output"]}
+                  contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #00000014" }}
+                />
+                <Bar dataKey="output" fill={meta.accent} radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        ) : (
+          <p className="text-xs text-zinc-400 text-center py-4">No production data yet to chart.</p>
         )}
       </div>
 
@@ -1257,7 +1284,7 @@ function Dashboard({ meta, items, batches, sales, canViewCosting }) {
         <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-zinc-400 mb-2">
           <TrendingUp size={12} /> Sales
         </div>
-        <div className="grid grid-cols-2 gap-2 text-center">
+        <div className="grid grid-cols-2 gap-2 text-center mb-2">
           <div>
             <div className="text-lg font-bold text-zinc-900">{totalUnitsSold.toFixed(0)}</div>
             <div className="text-[10px] text-zinc-500">Units sold</div>
@@ -1267,18 +1294,45 @@ function Dashboard({ meta, items, batches, sales, canViewCosting }) {
             <div className="text-[10px] text-zinc-500">Total revenue</div>
           </div>
         </div>
-        {topProducts.length > 0 && (
-          <div className="mt-3 pt-3" style={{ borderTop: "1px solid #00000010" }}>
-            <div className="text-[10px] uppercase tracking-wide text-zinc-400 mb-1.5">Top products</div>
-            {topProducts.map(([name, rev]) => (
-              <div key={name} className="flex justify-between text-xs text-zinc-600 py-0.5">
-                <span>{name}</span>
-                <span className="mono-font">₹{rev.toFixed(0)}</span>
-              </div>
-            ))}
+        {salesChart.length > 0 ? (
+          <div style={{ width: "100%", height: 160 }}>
+            <ResponsiveContainer>
+              <LineChart data={salesChart} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#00000010" vertical={false} />
+                <XAxis dataKey="date" tickFormatter={shortDate} tick={{ fontSize: 10, fill: "#9CA3AF" }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 10, fill: "#9CA3AF" }} axisLine={false} tickLine={false} width={36} />
+                <Tooltip
+                  labelFormatter={shortDate}
+                  formatter={(v) => [`₹${v.toFixed(0)}`, "Revenue"]}
+                  contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #00000014" }}
+                />
+                <Line type="monotone" dataKey="revenue" stroke={meta.accent} strokeWidth={2} dot={{ r: 3 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        ) : (
+          <p className="text-xs text-zinc-400 text-center py-4">No sales data yet to chart.</p>
+        )}
+
+        {topProductsChart.length > 0 && (
+          <div className="mt-2 pt-3" style={{ borderTop: "1px solid #00000010" }}>
+            <div className="text-[10px] uppercase tracking-wide text-zinc-400 mb-1.5">Revenue by product</div>
+            <div style={{ width: "100%", height: Math.max(120, topProductsChart.length * 32) }}>
+              <ResponsiveContainer>
+                <BarChart data={topProductsChart} layout="vertical" margin={{ top: 0, right: 16, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#00000010" horizontal={false} />
+                  <XAxis type="number" tick={{ fontSize: 10, fill: "#9CA3AF" }} axisLine={false} tickLine={false} />
+                  <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: "#4B5563" }} axisLine={false} tickLine={false} width={90} />
+                  <Tooltip
+                    formatter={(v) => [`₹${v.toFixed(0)}`, "Revenue"]}
+                    contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #00000014" }}
+                  />
+                  <Bar dataKey="revenue" fill={meta.accent} radius={[0, 4, 4, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
           </div>
         )}
-        {sales.length === 0 && <p className="text-xs text-zinc-500 mt-1">No sales logged yet.</p>}
       </div>
     </div>
   );
@@ -1308,7 +1362,6 @@ export default function App() {
     record(user.name, user.role);
   };
 
-  // Combined view: this brand's own items + the shared pool.
   const combined = [...items, ...sharedItems];
 
   const lowStock = combined.filter((i) => i.qty <= i.threshold);
@@ -1322,8 +1375,6 @@ export default function App() {
     return rows.sort((a, b) => new Date(b.date) - new Date(a.date));
   }, [items, sharedItems]);
 
-  // Route an update to whichever store the item currently lives in — moving it
-  // between stores if its "shared" flag changed.
   const updateItem = (updated) => {
     const inBrand = items.some((i) => i.id === updated.id);
     const inShared = sharedItems.some((i) => i.id === updated.id);
