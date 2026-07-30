@@ -4,7 +4,7 @@ import { db } from "./firebase";
 import {
   Plus, Package, AlertTriangle, Trash2, X, ChevronDown, ChevronUp,
   Truck, Clock, ArrowDownCircle, ArrowUpCircle, RotateCcw, User, History as HistoryIcon,
-  Shield, LogIn, Pencil, Factory, UploadCloud, Layers,
+  Shield, LogIn, Pencil, Factory, UploadCloud, Layers, ShoppingCart, LayoutDashboard, TrendingUp,
 } from "lucide-react";
 
 const DARK_GREEN = "#155830";
@@ -245,6 +245,29 @@ function useProduction(brand) {
   };
 
   return { batches, save };
+}
+
+function useSales(brand) {
+  const [sales, setSales] = useState([]);
+
+  useEffect(() => {
+    const ref = doc(db, "sales", brand);
+    const unsub = onSnapshot(ref, (snap) => {
+      setSales(snap.exists() ? snap.data().sales || [] : []);
+    });
+    return () => unsub();
+  }, [brand]);
+
+  const save = async (next) => {
+    setSales(next);
+    try {
+      await setDoc(doc(db, "sales", brand), { sales: sanitize(next) });
+    } catch (e) {
+      console.error("Failed to save sales log", e);
+    }
+  };
+
+  return { sales, save };
 }
 
 function useLoginLog() {
@@ -982,6 +1005,17 @@ function ProductionForm({ accent, name, rawMaterials, onSubmit, onClose }) {
 
 function ProductionCard({ batch, accent, isBoss, canViewCosting, onDelete }) {
   const [open, setOpen] = useState(false);
+  const c = batch.costing || {};
+  const materialCost = c.materialCost || 0;
+  const laborCost = c.laborCost || 0;
+  const canCost = c.canCost || 0;
+  const totalCost = c.totalCost || (materialCost + laborCost + canCost);
+  const costPerKg = c.costPerKg || (batch.outputQty > 0 ? totalCost / batch.outputQty : 0);
+  const gstAmount = c.gstAmount != null ? c.gstAmount : totalCost * GST_RATE;
+  const costPerKgWithGst = c.costPerKgWithGst != null
+    ? c.costPerKgWithGst
+    : (batch.outputQty > 0 ? (totalCost + gstAmount) / batch.outputQty : 0);
+
   return (
     <div className="rounded-xl overflow-hidden" style={{ background: "#FFFFFF", border: "1px solid #00000014" }}>
       <button className="w-full px-3.5 py-3 flex items-center gap-3 text-left" onClick={() => setOpen(!open)}>
@@ -1012,24 +1046,24 @@ function ProductionCard({ batch, accent, isBoss, canViewCosting, onDelete }) {
             ))}
           </div>
 
-          {canViewCosting && batch.costing && (
+          {canViewCosting && (
             <div className="mt-3 rounded-lg px-3 py-2.5" style={{ background: "#F7F8F7" }}>
               <div className="text-[10px] uppercase tracking-wide text-zinc-400 mb-1.5">Costing</div>
               <div className="space-y-1 text-xs text-zinc-600">
-                <div className="flex justify-between"><span>Material cost (FIFO)</span><span className="mono-font">₹{(batch.costing.materialCost || 0).toFixed(2)}</span></div>
-                <div className="flex justify-between"><span>Labor (15%)</span><span className="mono-font">₹{(batch.costing.laborCost || 0).toFixed(2)}</span></div>
-                <div className="flex justify-between"><span>Can / packaging</span><span className="mono-font">₹{(batch.costing.canCost || 0).toFixed(2)}</span></div>
+                <div className="flex justify-between"><span>Material cost (FIFO)</span><span className="mono-font">₹{materialCost.toFixed(2)}</span></div>
+                <div className="flex justify-between"><span>Labor (15%)</span><span className="mono-font">₹{laborCost.toFixed(2)}</span></div>
+                <div className="flex justify-between"><span>Can / packaging</span><span className="mono-font">₹{canCost.toFixed(2)}</span></div>
                 <div className="flex justify-between font-semibold text-zinc-800 pt-1" style={{ borderTop: "1px solid #00000010" }}>
-                  <span>Total cost</span><span className="mono-font">₹{(batch.costing.totalCost || 0).toFixed(2)}</span>
+                  <span>Total cost</span><span className="mono-font">₹{totalCost.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between font-semibold">
-                  <span>Cost / {batch.outputUnit}</span><span className="mono-font">₹{(batch.costing.costPerKg || 0).toFixed(2)}</span>
+                  <span>Cost / {batch.outputUnit}</span><span className="mono-font">₹{costPerKg.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between pt-1" style={{ borderTop: "1px solid #00000010" }}>
-                  <span>GST (18%)</span><span className="mono-font">₹{(batch.costing.gstAmount != null ? batch.costing.gstAmount : (batch.costing.totalCost || 0) * GST_RATE).toFixed(2)}</span>
+                  <span>GST (18%)</span><span className="mono-font">₹{gstAmount.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between font-semibold" style={{ color: accent }}>
-                  <span>Cost / {batch.outputUnit} incl. GST</span><span className="mono-font">₹{(batch.costing.costPerKgWithGst != null ? batch.costing.costPerKgWithGst : ((batch.costing.totalCost || 0) * (1 + GST_RATE)) / (batch.outputQty || 1)).toFixed(2)}</span>
+                  <span>Cost / {batch.outputUnit} incl. GST</span><span className="mono-font">₹{costPerKgWithGst.toFixed(2)}</span>
                 </div>
               </div>
             </div>
@@ -1049,16 +1083,219 @@ function ProductionCard({ batch, accent, isBoss, canViewCosting, onDelete }) {
   );
 }
 
+function SalesForm({ accent, name, finishedGoods, onSubmit, onClose }) {
+  const [customerName, setCustomerName] = useState("");
+  const [productId, setProductId] = useState("");
+  const [qty, setQty] = useState("");
+  const [pricePerUnit, setPricePerUnit] = useState("");
+  const [date, setDate] = useState(todayStr());
+
+  const submit = () => {
+    const product = finishedGoods.find((p) => p.id === productId);
+    if (!customerName.trim() || !product || !qty || !pricePerUnit) return;
+    const q = Number(qty);
+    const price = Number(pricePerUnit);
+    onSubmit({
+      id: uid(),
+      customerName: customerName.trim(),
+      productId: product.id,
+      productName: product.name,
+      qty: q,
+      unit: product.unit,
+      pricePerUnit: price,
+      totalAmount: q * price,
+      date,
+      by: name,
+      createdAt: new Date().toISOString(),
+    });
+    onClose();
+  };
+
+  return (
+    <div className="rounded-xl p-4 mb-3" style={{ background: "#F3F5F4", border: "1px solid #00000012" }}>
+      <div className="flex justify-between items-center mb-3">
+        <span className="text-sm font-semibold tracking-wide" style={{ color: accent }}>NEW SALE</span>
+        <button onClick={onClose} aria-label="Close form"><X size={16} className="text-zinc-400" /></button>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div className="col-span-2"><input placeholder="Customer name" value={customerName} onChange={(e) => setCustomerName(e.target.value)} className={inputCls} /></div>
+        <div className="col-span-2">
+          <select value={productId} onChange={(e) => setProductId(e.target.value)} className={inputCls}>
+            <option value="">Select product…</option>
+            {finishedGoods.map((p) => (
+              <option key={p.id} value={p.id}>{p.name} ({p.qty}{p.unit} available)</option>
+            ))}
+          </select>
+        </div>
+        {finishedGoods.length === 0 && (
+          <p className="col-span-2 text-xs text-zinc-500">No finished goods yet — log a production batch first.</p>
+        )}
+        <input placeholder="Qty sold" type="number" value={qty} onChange={(e) => setQty(e.target.value)} className={inputCls} />
+        <input placeholder="Price per unit (₹)" type="number" value={pricePerUnit} onChange={(e) => setPricePerUnit(e.target.value)} className={inputCls} />
+        <div className="col-span-2"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} /></div>
+      </div>
+      <button onClick={submit} className="mt-3 w-full rounded-lg py-2 text-sm font-semibold" style={{ background: accent, color: "#ffffff" }}>
+        Log sale &amp; deduct stock
+      </button>
+    </div>
+  );
+}
+
+function SalesCard({ sale, accent, isBoss, onDelete }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded-xl overflow-hidden" style={{ background: "#FFFFFF", border: "1px solid #00000014" }}>
+      <button className="w-full px-3.5 py-3 flex items-center gap-3 text-left" onClick={() => setOpen(!open)}>
+        <ShoppingCart size={18} style={{ color: accent }} className="shrink-0" />
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium text-zinc-900 truncate">{sale.customerName}</div>
+          <div className="text-xs text-zinc-500 mt-0.5 truncate">{sale.productName} · {sale.qty}{sale.unit} · {sale.date}</div>
+        </div>
+        <span className="mono-font text-xs shrink-0 text-zinc-700">₹{sale.totalAmount.toFixed(0)}</span>
+        {open ? <ChevronUp size={16} className="text-zinc-400" /> : <ChevronDown size={16} className="text-zinc-400" />}
+      </button>
+      {open && (
+        <div className="px-3.5 pb-3.5" style={{ borderTop: "1px solid #00000010" }}>
+          <div className="mt-3 space-y-1 text-xs text-zinc-600">
+            <div className="flex justify-between"><span>Price per {sale.unit}</span><span className="mono-font">₹{sale.pricePerUnit}</span></div>
+            <div className="flex justify-between"><span>Quantity</span><span className="mono-font">{sale.qty}{sale.unit}</span></div>
+            <div className="flex justify-between font-semibold text-zinc-800 pt-1" style={{ borderTop: "1px solid #00000010" }}>
+              <span>Total</span><span className="mono-font">₹{sale.totalAmount.toFixed(2)}</span>
+            </div>
+          </div>
+          <div className="text-[10px] text-zinc-400 flex items-center gap-1 mt-3">
+            <User size={9} /> Logged by {sale.by} · {fmtDate(sale.createdAt)}
+          </div>
+          {isBoss && (
+            <button onClick={() => onDelete(sale.id)} className="mt-3 flex items-center gap-1.5 text-xs text-zinc-400">
+              <Trash2 size={12} /> Remove log entry (stock changes stay as-is)
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Dashboard({ meta, items, batches, sales, canViewCosting }) {
+  const lowStockItems = items.filter((i) => i.qty <= i.threshold);
+  const rawCount = items.filter((i) => i.category === "Raw material").length;
+  const packCount = items.filter((i) => i.category === "Packaging").length;
+  const fgCount = items.filter((i) => i.category === "Finished good").length;
+
+  const totalOutput = batches.reduce((s, b) => s + (b.outputQty || 0), 0);
+  const totalProdCost = batches.reduce((s, b) => s + (b.costing?.totalCost || 0), 0);
+
+  const totalRevenue = sales.reduce((s, x) => s + (x.totalAmount || 0), 0);
+  const totalUnitsSold = sales.reduce((s, x) => s + (x.qty || 0), 0);
+  const revenueByProduct = {};
+  sales.forEach((x) => {
+    revenueByProduct[x.productName] = (revenueByProduct[x.productName] || 0) + x.totalAmount;
+  });
+  const topProducts = Object.entries(revenueByProduct).sort((a, b) => b[1] - a[1]).slice(0, 3);
+
+  const cardStyle = { background: "#FFFFFF", border: "1px solid #00000014" };
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-xl p-4" style={cardStyle}>
+        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-zinc-400 mb-2">
+          <Package size={12} /> Stock overview
+        </div>
+        <div className="grid grid-cols-3 gap-2 text-center">
+          <div>
+            <div className="text-lg font-bold text-zinc-900">{rawCount}</div>
+            <div className="text-[10px] text-zinc-500">Raw materials</div>
+          </div>
+          <div>
+            <div className="text-lg font-bold text-zinc-900">{packCount}</div>
+            <div className="text-[10px] text-zinc-500">Packaging</div>
+          </div>
+          <div>
+            <div className="text-lg font-bold text-zinc-900">{fgCount}</div>
+            <div className="text-[10px] text-zinc-500">Finished goods</div>
+          </div>
+        </div>
+        {lowStockItems.length > 0 && (
+          <div className="mt-3 pt-3" style={{ borderTop: "1px solid #00000010" }}>
+            <div className="flex items-center gap-1.5 text-xs mb-1.5" style={{ color: "#D1453B" }}>
+              <AlertTriangle size={12} /> {lowStockItems.length} item{lowStockItems.length > 1 ? "s" : ""} at or below reorder point
+            </div>
+            {lowStockItems.slice(0, 4).map((i) => (
+              <div key={i.id} className="flex justify-between text-xs text-zinc-600 py-0.5">
+                <span>{i.name}</span>
+                <span className="mono-font" style={{ color: "#D1453B" }}>{i.qty}{i.unit}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-xl p-4" style={cardStyle}>
+        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-zinc-400 mb-2">
+          <Factory size={12} /> Production
+        </div>
+        <div className="grid grid-cols-2 gap-2 text-center">
+          <div>
+            <div className="text-lg font-bold text-zinc-900">{batches.length}</div>
+            <div className="text-[10px] text-zinc-500">Batches logged</div>
+          </div>
+          <div>
+            <div className="text-lg font-bold text-zinc-900">{totalOutput.toFixed(0)}</div>
+            <div className="text-[10px] text-zinc-500">Total output (kg)</div>
+          </div>
+        </div>
+        {canViewCosting && (
+          <div className="mt-2 pt-2 text-center" style={{ borderTop: "1px solid #00000010" }}>
+            <div className="text-sm font-semibold" style={{ color: meta.accent }}>₹{totalProdCost.toFixed(2)}</div>
+            <div className="text-[10px] text-zinc-500">Total production cost</div>
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-xl p-4" style={cardStyle}>
+        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-zinc-400 mb-2">
+          <TrendingUp size={12} /> Sales
+        </div>
+        <div className="grid grid-cols-2 gap-2 text-center">
+          <div>
+            <div className="text-lg font-bold text-zinc-900">{totalUnitsSold.toFixed(0)}</div>
+            <div className="text-[10px] text-zinc-500">Units sold</div>
+          </div>
+          <div>
+            <div className="text-lg font-bold" style={{ color: meta.accent }}>₹{totalRevenue.toFixed(0)}</div>
+            <div className="text-[10px] text-zinc-500">Total revenue</div>
+          </div>
+        </div>
+        {topProducts.length > 0 && (
+          <div className="mt-3 pt-3" style={{ borderTop: "1px solid #00000010" }}>
+            <div className="text-[10px] uppercase tracking-wide text-zinc-400 mb-1.5">Top products</div>
+            {topProducts.map(([name, rev]) => (
+              <div key={name} className="flex justify-between text-xs text-zinc-600 py-0.5">
+                <span>{name}</span>
+                <span className="mono-font">₹{rev.toFixed(0)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {sales.length === 0 && <p className="text-xs text-zinc-500 mt-1">No sales logged yet.</p>}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [brand, setBrand] = useState("urbnfettch");
   const [tab, setTab] = useState("items");
   const [showForm, setShowForm] = useState(false);
   const [showBulkImport, setShowBulkImport] = useState(false);
   const [showProdForm, setShowProdForm] = useState(false);
+  const [showSalesForm, setShowSalesForm] = useState(false);
   const [filter, setFilter] = useState("All");
   const { items, save, loading } = useInventory(brand);
   const { items: sharedItems, save: saveShared, loading: sharedLoading } = useSharedInventory();
   const { batches, save: saveBatches } = useProduction(brand);
+  const { sales, save: saveSales } = useSales(brand);
   const { session, save: saveSession } = useSession();
   const { logins, record } = useLoginLog();
   const meta = BRANDS[brand];
@@ -1077,6 +1314,7 @@ export default function App() {
   const lowStock = combined.filter((i) => i.qty <= i.threshold);
   const visible = filter === "All" ? combined : filter === "Low stock" ? lowStock : combined.filter((i) => i.category === filter);
   const rawMaterials = combined.filter((i) => i.category === "Raw material");
+  const finishedGoods = combined.filter((i) => i.category === "Finished good");
 
   const allHistory = useMemo(() => {
     const rows = [];
@@ -1209,6 +1447,37 @@ export default function App() {
     saveBatches(batches.filter((b) => b.id !== id));
   };
 
+  const sellStock = (sale) => {
+    const inBrandIdx = items.findIndex((i) => i.id === sale.productId);
+    const inSharedIdx = sharedItems.findIndex((i) => i.id === sale.productId);
+
+    const applyDeduction = (product) => ({
+      ...product,
+      qty: Math.max(0, product.qty - sale.qty),
+      history: [
+        { id: uid(), type: "out", qty: sale.qty, date: new Date().toISOString(), note: `Sold to ${sale.customerName}`, by: sale.by },
+        ...product.history,
+      ],
+    });
+
+    if (inBrandIdx >= 0) {
+      const nextItems = [...items];
+      nextItems[inBrandIdx] = applyDeduction(nextItems[inBrandIdx]);
+      save(nextItems);
+    } else if (inSharedIdx >= 0) {
+      const nextShared = [...sharedItems];
+      nextShared[inSharedIdx] = applyDeduction(nextShared[inSharedIdx]);
+      saveShared(nextShared);
+    }
+
+    saveSales([sale, ...sales]);
+  };
+
+  const deleteSale = (id) => {
+    if (!isBoss) return;
+    saveSales(sales.filter((s) => s.id !== id));
+  };
+
   if (!session) return <PinGate onLogin={handleLogin} />;
 
   return (
@@ -1252,8 +1521,10 @@ export default function App() {
 
       <div className="flex gap-1 px-4 mt-4 overflow-x-auto">
         {[
+          { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
           { key: "items", label: "Items", icon: Package },
           { key: "production", label: "Production", icon: Factory },
+          { key: "sales", label: "Sales", icon: ShoppingCart },
           { key: "history", label: "History", icon: HistoryIcon },
           ...(isBoss ? [{ key: "logins", label: "Logins", icon: Shield }] : []),
         ].map(({ key, label, icon: Icon }) => (
@@ -1300,6 +1571,8 @@ export default function App() {
       <div className="px-4 py-4 pb-24">
         {loading || sharedLoading ? (
           <div className="text-center text-zinc-400 text-sm py-10">Loading…</div>
+        ) : tab === "dashboard" ? (
+          <Dashboard meta={meta} items={combined} batches={batches} sales={sales} canViewCosting={canViewCosting} />
         ) : tab === "items" ? (
           <>
             {showBulkImport && (
@@ -1347,6 +1620,30 @@ export default function App() {
             <div className="space-y-2">
               {batches.map((batch) => (
                 <ProductionCard key={batch.id} batch={batch} accent={meta.accent} isBoss={isBoss} canViewCosting={canViewCosting} onDelete={deleteBatch} />
+              ))}
+            </div>
+          </>
+        ) : tab === "sales" ? (
+          <>
+            {showSalesForm && (
+              <SalesForm
+                accent={meta.accent}
+                name={session.name}
+                finishedGoods={finishedGoods}
+                onClose={() => setShowSalesForm(false)}
+                onSubmit={sellStock}
+              />
+            )}
+            {sales.length === 0 && !showSalesForm && (
+              <div className="text-center py-14">
+                <ShoppingCart size={28} className="mx-auto text-zinc-300 mb-2" />
+                <p className="text-sm text-zinc-500">No sales logged yet for {meta.label}.</p>
+                <p className="text-xs text-zinc-400 mt-1">Tap + to log your first sale.</p>
+              </div>
+            )}
+            <div className="space-y-2">
+              {sales.map((sale) => (
+                <SalesCard key={sale.id} sale={sale} accent={meta.accent} isBoss={isBoss} onDelete={deleteSale} />
               ))}
             </div>
           </>
@@ -1406,6 +1703,17 @@ export default function App() {
           className="fixed bottom-6 right-6 w-12 h-12 rounded-full flex items-center justify-center shadow-lg"
           style={{ background: meta.accent }}
           aria-label="Log new production batch"
+        >
+          <Plus size={22} color="#ffffff" strokeWidth={2.5} />
+        </button>
+      )}
+
+      {tab === "sales" && (
+        <button
+          onClick={() => setShowSalesForm(true)}
+          className="fixed bottom-6 right-6 w-12 h-12 rounded-full flex items-center justify-center shadow-lg"
+          style={{ background: meta.accent }}
+          aria-label="Log new sale"
         >
           <Plus size={22} color="#ffffff" strokeWidth={2.5} />
         </button>
