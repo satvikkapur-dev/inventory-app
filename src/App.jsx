@@ -5,6 +5,7 @@ import {
   Plus, Package, AlertTriangle, Trash2, X, ChevronDown, ChevronUp,
   Truck, Clock, ArrowDownCircle, ArrowUpCircle, RotateCcw, User, History as HistoryIcon,
   Shield, LogIn, Pencil, Factory, UploadCloud, Layers, ShoppingCart, LayoutDashboard, TrendingUp,
+  FlaskConical, CheckCircle2, XCircle,
 } from "lucide-react";
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -30,16 +31,16 @@ const BRANDS = {
 
 const CATEGORIES = ["Raw material", "Packaging", "Finished good"];
 const UNITS = ["g", "kg", "ml", "L", "units", "drums", "cartons"];
-const LABOR_RATE = 0.15; // 15% of material cost
-const CAN_RATES = { old: 3.5, new: 6 }; // ₹ per kg of output
-const GST_RATE = 0.18; // 18%
+const LABOR_RATE = 0.15;
+const CAN_RATES = { old: 3.5, new: 6 };
+const GST_RATE = 0.18;
 
-// Add/edit your team here. role "boss" can delete/edit items, "staff" cannot.
 const USERS = [
   { name: "Satvik", pin: "8942", role: "boss", canViewCosting: true },
   { name: "SCPL", pin: "8941", role: "staff", canViewCosting: true },
   { name: "Vijay", pin: "2314", role: "staff", canViewCosting: false },
   { name: "Jyoti", pin: "3214", role: "staff", canViewCosting: false },
+  { name: "Mohit", pin: "4213", role: "lab", canViewCosting: false },
 ];
 
 function uid() {
@@ -255,6 +256,29 @@ function useSales(brand) {
   };
 
   return { sales, save };
+}
+
+function useLab(brand) {
+  const [tests, setTests] = useState([]);
+
+  useEffect(() => {
+    const ref = doc(db, "lab", brand);
+    const unsub = onSnapshot(ref, (snap) => {
+      setTests(snap.exists() ? snap.data().tests || [] : []);
+    });
+    return () => unsub();
+  }, [brand]);
+
+  const save = async (next) => {
+    setTests(next);
+    try {
+      await setDoc(doc(db, "lab", brand), { tests: sanitize(next) });
+    } catch (e) {
+      console.error("Failed to save lab log", e);
+    }
+  };
+
+  return { tests, save };
 }
 
 function useLoginLog() {
@@ -1164,6 +1188,148 @@ function SalesCard({ sale, accent, isBoss, onDelete }) {
   );
 }
 
+function LabForm({ accent, name, onSubmit, onClose, hideClose }) {
+  const [testingNumber, setTestingNumber] = useState("");
+  const [batchNumber, setBatchNumber] = useState("");
+  const [productName, setProductName] = useState("");
+  const [date, setDate] = useState(todayStr());
+  const [params, setParams] = useState([{ id: uid(), name: "", result: "", unit: "", specMin: "", specMax: "" }]);
+
+  const addParam = () => setParams([...params, { id: uid(), name: "", result: "", unit: "", specMin: "", specMax: "" }]);
+  const removeParam = (id) => setParams(params.filter((p) => p.id !== id));
+  const updateParam = (id, patch) => setParams(params.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+
+  const submit = () => {
+    if (!testingNumber.trim() || !productName.trim()) return;
+    const finalParams = params
+      .filter((p) => p.name.trim() && p.result !== "")
+      .map((p) => {
+        const result = Number(p.result);
+        const min = p.specMin !== "" ? Number(p.specMin) : null;
+        const max = p.specMax !== "" ? Number(p.specMax) : null;
+        const pass = (min === null || result >= min) && (max === null || result <= max);
+        return { id: p.id, name: p.name.trim(), result, unit: p.unit.trim(), specMin: min, specMax: max, pass };
+      });
+    if (finalParams.length === 0) return;
+    const overallPass = finalParams.every((p) => p.pass);
+
+    onSubmit({
+      id: uid(),
+      testingNumber: testingNumber.trim(),
+      batchNumber: batchNumber.trim(),
+      productName: productName.trim(),
+      date,
+      parameters: finalParams,
+      overallPass,
+      by: name,
+      createdAt: new Date().toISOString(),
+    });
+    onClose();
+  };
+
+  return (
+    <div className="rounded-xl p-4 mb-3" style={{ background: "#F3F5F4", border: "1px solid #00000012" }}>
+      <div className="flex justify-between items-center mb-3">
+        <span className="text-sm font-semibold tracking-wide" style={{ color: accent }}>NEW LAB TEST</span>
+        {!hideClose && <button onClick={onClose} aria-label="Close form"><X size={16} className="text-zinc-400" /></button>}
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <input placeholder="Testing number" value={testingNumber} onChange={(e) => setTestingNumber(e.target.value)} className={inputCls} />
+        <input placeholder="Batch number (optional)" value={batchNumber} onChange={(e) => setBatchNumber(e.target.value)} className={inputCls} />
+        <div className="col-span-2"><input placeholder="Product / sample name" value={productName} onChange={(e) => setProductName(e.target.value)} className={inputCls} /></div>
+        <div className="col-span-2"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} /></div>
+      </div>
+
+      <div className="mt-3">
+        <div className="text-[10px] uppercase tracking-wide text-zinc-400 mb-1.5">Test parameters</div>
+        <div className="space-y-2">
+          {params.map((p) => (
+            <div key={p.id} className="rounded-lg p-2" style={{ background: "#FFFFFF", border: "1px solid #00000012" }}>
+              <div className="flex gap-2 mb-1.5">
+                <input placeholder="Test name (e.g. Viscosity)" value={p.name} onChange={(e) => updateParam(p.id, { name: e.target.value })} className={inputCls + " flex-1"} />
+                {params.length > 1 && (
+                  <button onClick={() => removeParam(p.id)} aria-label="Remove parameter" className="shrink-0">
+                    <X size={16} className="text-zinc-400" />
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                <input placeholder="Result" type="number" value={p.result} onChange={(e) => updateParam(p.id, { result: e.target.value })} className={inputCls} />
+                <input placeholder="Unit (e.g. cP)" value={p.unit} onChange={(e) => updateParam(p.id, { unit: e.target.value })} className={inputCls} />
+                <input placeholder="Spec min" type="number" value={p.specMin} onChange={(e) => updateParam(p.id, { specMin: e.target.value })} className={inputCls} />
+                <input placeholder="Spec max" type="number" value={p.specMax} onChange={(e) => updateParam(p.id, { specMax: e.target.value })} className={inputCls} />
+              </div>
+            </div>
+          ))}
+        </div>
+        <button onClick={addParam} className="mt-2 text-xs flex items-center gap-1" style={{ color: accent }}>
+          <Plus size={12} /> Add test parameter
+        </button>
+      </div>
+
+      <button onClick={submit} className="mt-4 w-full rounded-lg py-2 text-sm font-semibold" style={{ background: accent, color: "#ffffff" }}>
+        Log test result
+      </button>
+    </div>
+  );
+}
+
+function LabCard({ test, accent, isBoss, onDelete }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded-xl overflow-hidden" style={{ background: "#FFFFFF", border: `1px solid ${test.overallPass ? "#00000014" : "#D1453B55"}` }}>
+      <button className="w-full px-3.5 py-3 flex items-center gap-3 text-left" onClick={() => setOpen(!open)}>
+        <FlaskConical size={18} style={{ color: accent }} className="shrink-0" />
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium text-zinc-900 truncate">{test.productName}</div>
+          <div className="text-xs text-zinc-500 mt-0.5 truncate">
+            Test #{test.testingNumber}{test.batchNumber ? ` · Batch ${test.batchNumber}` : ""} · {test.date}
+          </div>
+        </div>
+        <span
+          className="text-[10px] font-semibold px-2 py-1 rounded-full shrink-0 flex items-center gap-1"
+          style={{ background: test.overallPass ? "#2E9E5B18" : "#D1453B18", color: test.overallPass ? "#2E9E5B" : "#D1453B" }}
+        >
+          {test.overallPass ? <CheckCircle2 size={11} /> : <XCircle size={11} />}
+          {test.overallPass ? "PASS" : "FAIL"}
+        </span>
+        {open ? <ChevronUp size={16} className="text-zinc-400" /> : <ChevronDown size={16} className="text-zinc-400" />}
+      </button>
+      {open && (
+        <div className="px-3.5 pb-3.5" style={{ borderTop: "1px solid #00000010" }}>
+          <div className="mt-3 text-[10px] uppercase tracking-wide text-zinc-400 mb-1.5">Parameters</div>
+          <div className="space-y-1.5">
+            {test.parameters.map((p) => (
+              <div key={p.id} className="flex items-center justify-between text-xs">
+                <div className="flex items-center gap-1.5">
+                  {p.pass ? <CheckCircle2 size={12} style={{ color: "#2E9E5B" }} /> : <XCircle size={12} style={{ color: "#D1453B" }} />}
+                  <span className="text-zinc-700">{p.name}</span>
+                </div>
+                <div className="text-right">
+                  <span className="mono-font font-semibold" style={{ color: p.pass ? "#2E9E5B" : "#D1453B" }}>{p.result}{p.unit}</span>
+                  {(p.specMin != null || p.specMax != null) && (
+                    <span className="text-zinc-400 ml-1">
+                      (spec {p.specMin != null ? p.specMin : "–"}–{p.specMax != null ? p.specMax : "–"})
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="text-[10px] text-zinc-400 flex items-center gap-1 mt-3">
+            <User size={9} /> Logged by {test.by} · {fmtDate(test.createdAt)}
+          </div>
+          {isBoss && (
+            <button onClick={() => onDelete(test.id)} className="mt-3 flex items-center gap-1.5 text-xs text-zinc-400">
+              <Trash2 size={12} /> Remove test record
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Dashboard({ meta, items, batches, sales, canViewCosting }) {
   const lowStockItems = items.filter((i) => i.qty <= i.threshold);
   const rawCount = items.filter((i) => i.category === "Raw material").length;
@@ -1345,17 +1511,26 @@ export default function App() {
   const [showBulkImport, setShowBulkImport] = useState(false);
   const [showProdForm, setShowProdForm] = useState(false);
   const [showSalesForm, setShowSalesForm] = useState(false);
+  const [showLabForm, setShowLabForm] = useState(false);
   const [filter, setFilter] = useState("All");
   const { items, save, loading } = useInventory(brand);
   const { items: sharedItems, save: saveShared, loading: sharedLoading } = useSharedInventory();
   const { batches, save: saveBatches } = useProduction(brand);
   const { sales, save: saveSales } = useSales(brand);
+  const { tests, save: saveTests } = useLab(brand);
   const { session, save: saveSession } = useSession();
   const { logins, record } = useLoginLog();
   const meta = BRANDS[brand];
 
   const isBoss = session?.role === "boss";
   const canViewCosting = !!session?.canViewCosting;
+  const isLabOnly = session?.role === "lab";
+  const canSeeLabTab = canViewCosting || isLabOnly;
+  const [labResetKey, setLabResetKey] = useState(0);
+
+  useEffect(() => {
+    if (session?.role === "lab") setTab("lab");
+  }, [session]);
 
   const handleLogin = (user) => {
     saveSession({ name: user.name, role: user.role, canViewCosting: !!user.canViewCosting });
@@ -1529,6 +1704,15 @@ export default function App() {
     saveSales(sales.filter((s) => s.id !== id));
   };
 
+  const addLabTest = (test) => {
+    saveTests([test, ...tests]);
+    setLabResetKey((k) => k + 1);
+  };
+  const deleteLabTest = (id) => {
+    if (!isBoss) return;
+    saveTests(tests.filter((t) => t.id !== id));
+  };
+
   if (!session) return <PinGate onLogin={handleLogin} />;
 
   return (
@@ -1571,14 +1755,18 @@ export default function App() {
       )}
 
       <div className="flex gap-1 px-4 mt-4 overflow-x-auto">
-        {[
-          { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-          { key: "items", label: "Items", icon: Package },
-          { key: "production", label: "Production", icon: Factory },
-          { key: "sales", label: "Sales", icon: ShoppingCart },
-          { key: "history", label: "History", icon: HistoryIcon },
-          ...(isBoss ? [{ key: "logins", label: "Logins", icon: Shield }] : []),
-        ].map(({ key, label, icon: Icon }) => (
+        {(isLabOnly
+          ? [{ key: "lab", label: "Lab", icon: FlaskConical }]
+          : [
+              { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+              { key: "items", label: "Items", icon: Package },
+              { key: "production", label: "Production", icon: Factory },
+              { key: "sales", label: "Sales", icon: ShoppingCart },
+              ...(canSeeLabTab ? [{ key: "lab", label: "Lab", icon: FlaskConical }] : []),
+              { key: "history", label: "History", icon: HistoryIcon },
+              ...(isBoss ? [{ key: "logins", label: "Logins", icon: Shield }] : []),
+            ]
+        ).map(({ key, label, icon: Icon }) => (
           <button
             key={key}
             onClick={() => setTab(key)}
@@ -1622,6 +1810,15 @@ export default function App() {
       <div className="px-4 py-4 pb-24">
         {loading || sharedLoading ? (
           <div className="text-center text-zinc-400 text-sm py-10">Loading…</div>
+        ) : isLabOnly ? (
+          <LabForm
+            key={labResetKey}
+            accent={meta.accent}
+            name={session.name}
+            hideClose
+            onClose={() => {}}
+            onSubmit={addLabTest}
+          />
         ) : tab === "dashboard" ? (
           <Dashboard meta={meta} items={combined} batches={batches} sales={sales} canViewCosting={canViewCosting} />
         ) : tab === "items" ? (
@@ -1698,6 +1895,29 @@ export default function App() {
               ))}
             </div>
           </>
+        ) : tab === "lab" ? (
+          <>
+            {showLabForm && (
+              <LabForm
+                accent={meta.accent}
+                name={session.name}
+                onClose={() => setShowLabForm(false)}
+                onSubmit={addLabTest}
+              />
+            )}
+            {tests.length === 0 && !showLabForm && (
+              <div className="text-center py-14">
+                <FlaskConical size={28} className="mx-auto text-zinc-300 mb-2" />
+                <p className="text-sm text-zinc-500">No lab tests logged yet for {meta.label}.</p>
+                <p className="text-xs text-zinc-400 mt-1">Tap + to log your first test.</p>
+              </div>
+            )}
+            <div className="space-y-2">
+              {tests.map((test) => (
+                <LabCard key={test.id} test={test} accent={meta.accent} isBoss={isBoss} onDelete={deleteLabTest} />
+              ))}
+            </div>
+          </>
         ) : tab === "history" ? (
           <div className="rounded-xl px-3.5 py-2" style={{ background: "#FFFFFF", border: "1px solid #00000014" }}>
             {allHistory.length === 0 ? (
@@ -1765,6 +1985,17 @@ export default function App() {
           className="fixed bottom-6 right-6 w-12 h-12 rounded-full flex items-center justify-center shadow-lg"
           style={{ background: meta.accent }}
           aria-label="Log new sale"
+        >
+          <Plus size={22} color="#ffffff" strokeWidth={2.5} />
+        </button>
+      )}
+
+      {tab === "lab" && !isLabOnly && (
+        <button
+          onClick={() => setShowLabForm(true)}
+          className="fixed bottom-6 right-6 w-12 h-12 rounded-full flex items-center justify-center shadow-lg"
+          style={{ background: meta.accent }}
+          aria-label="Log new lab test"
         >
           <Plus size={22} color="#ffffff" strokeWidth={2.5} />
         </button>
