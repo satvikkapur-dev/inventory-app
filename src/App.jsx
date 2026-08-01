@@ -5,7 +5,7 @@ import {
   Plus, Package, AlertTriangle, Trash2, X, ChevronDown, ChevronUp,
   Truck, Clock, ArrowDownCircle, ArrowUpCircle, RotateCcw, User, History as HistoryIcon,
   Shield, LogIn, Pencil, Factory, UploadCloud, Layers, ShoppingCart, LayoutDashboard, TrendingUp,
-  FlaskConical, CheckCircle2, XCircle,
+  FlaskConical, CheckCircle2, XCircle, Download,
 } from "lucide-react";
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -64,6 +64,105 @@ function fmtDate(iso) {
   const d = new Date(iso);
   return d.toLocaleDateString(undefined, { day: "numeric", month: "short" }) + " · " +
     d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
+
+// Builds a full, print-ready HTML document for a lab test — opened in a new
+// tab so the user can "Print / Save as PDF" a professional-looking report.
+function buildLabReportHTML(test, brandLabel) {
+  const rows = test.parameters
+    .map(
+      (p) => `
+        <tr>
+          <td>${p.name}</td>
+          <td class="num">${p.result}${p.unit || ""}</td>
+          <td class="num">${p.specMin != null ? p.specMin : "–"} – ${p.specMax != null ? p.specMax : "–"}${p.unit || ""}</td>
+          <td class="status ${p.pass ? "pass" : "fail"}">${p.pass ? "PASS" : "FAIL"}</td>
+        </tr>`
+    )
+    .join("");
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Certificate of Analysis — ${test.testingNumber}</title>
+<style>
+  @page { margin: 24mm 18mm; }
+  * { box-sizing: border-box; }
+  body { font-family: Georgia, 'Times New Roman', serif; color: #1a1a1a; margin: 0; padding: 40px; }
+  .wordmark { font-family: Arial, sans-serif; font-weight: 800; font-size: 22px; letter-spacing: 0.5px; }
+  .wordmark .a { color: #155830; }
+  .wordmark .b { color: #59A249; }
+  .tagline { font-family: Arial, sans-serif; font-size: 10px; color: #666; letter-spacing: 1px; margin-top: 2px; }
+  .doc-title { font-family: Arial, sans-serif; font-size: 15px; font-weight: 700; letter-spacing: 2px; text-align: center; margin: 36px 0 4px; text-transform: uppercase; color: #155830; }
+  .doc-sub { font-family: Arial, sans-serif; font-size: 11px; text-align: center; color: #888; margin-bottom: 32px; letter-spacing: 1px; }
+  .rule { border: none; border-top: 2px solid #155830; margin: 0 0 24px; }
+  .meta { width: 100%; border-collapse: collapse; margin-bottom: 28px; font-family: Arial, sans-serif; font-size: 12px; }
+  .meta td { padding: 6px 0; }
+  .meta td.label { color: #888; width: 140px; text-transform: uppercase; letter-spacing: 0.5px; font-size: 10px; }
+  .meta td.value { font-weight: 600; color: #1a1a1a; }
+  table.results { width: 100%; border-collapse: collapse; font-family: Arial, sans-serif; font-size: 12px; margin-bottom: 28px; }
+  table.results th { text-align: left; background: #F3F5F4; padding: 10px 12px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: #555; border-bottom: 2px solid #155830; }
+  table.results td { padding: 10px 12px; border-bottom: 1px solid #e5e5e5; }
+  table.results td.num { font-family: 'Courier New', monospace; }
+  table.results td.status { font-weight: 700; letter-spacing: 0.5px; }
+  table.results td.status.pass { color: #2E9E5B; }
+  table.results td.status.fail { color: #D1453B; }
+  .overall { font-family: Arial, sans-serif; text-align: center; margin: 36px 0; }
+  .overall .badge { display: inline-block; padding: 10px 32px; border-radius: 4px; font-weight: 800; letter-spacing: 3px; font-size: 16px; }
+  .overall .badge.pass { background: #2E9E5B15; color: #2E9E5B; border: 2px solid #2E9E5B; }
+  .overall .badge.fail { background: #D1453B15; color: #D1453B; border: 2px solid #D1453B; }
+  .footer { margin-top: 60px; font-family: Arial, sans-serif; font-size: 10px; color: #999; display: flex; justify-content: space-between; border-top: 1px solid #eee; padding-top: 14px; }
+  .sig { margin-top: 50px; display: flex; justify-content: space-between; font-family: Arial, sans-serif; font-size: 11px; }
+  .sig div { width: 45%; }
+  .sig .line { border-top: 1px solid #333; margin-top: 40px; padding-top: 6px; color: #666; font-size: 10px; }
+  .print-bar { text-align: center; margin-bottom: 24px; }
+  .print-bar button { font-family: Arial, sans-serif; background: #155830; color: #fff; border: none; padding: 10px 22px; border-radius: 6px; font-size: 13px; cursor: pointer; }
+  @media print { .print-bar { display: none; } body { padding: 0; } }
+</style>
+</head>
+<body>
+  <div class="print-bar"><button onclick="window.print()">Print / Save as PDF</button></div>
+
+  <div class="wordmark"><span class="a">URBN</span><span class="b">FETTCH</span></div>
+  <div class="tagline">A UNIT OF SANIL CHEMICALS &nbsp;·&nbsp; ${brandLabel.toUpperCase()}</div>
+
+  <hr class="rule" />
+
+  <div class="doc-title">Certificate of Analysis</div>
+  <div class="doc-sub">Laboratory Test Report</div>
+
+  <table class="meta">
+    <tr><td class="label">Testing No.</td><td class="value">${test.testingNumber}</td></tr>
+    ${test.batchNumber ? `<tr><td class="label">Batch No.</td><td class="value">${test.batchNumber}</td></tr>` : ""}
+    <tr><td class="label">Product / Sample</td><td class="value">${test.productName}</td></tr>
+    <tr><td class="label">Date of Testing</td><td class="value">${test.date}</td></tr>
+  </table>
+
+  <table class="results">
+    <thead>
+      <tr><th>Test Parameter</th><th>Result</th><th>Specification</th><th>Status</th></tr>
+    </thead>
+    <tbody>
+      ${rows}
+    </tbody>
+  </table>
+
+  <div class="overall">
+    <div class="badge ${test.overallPass ? "pass" : "fail"}">OVERALL RESULT: ${test.overallPass ? "PASS" : "FAIL"}</div>
+  </div>
+
+  <div class="sig">
+    <div><div class="line">Tested By — ${test.by}</div></div>
+    <div><div class="line">Authorized Signatory</div></div>
+  </div>
+
+  <div class="footer">
+    <span>Generated ${fmtDate(new Date().toISOString())}</span>
+    <span>System-generated report — URBNFETTCH Inventory Tracker</span>
+  </div>
+</body>
+</html>`;
 }
 
 function todayStr() {
@@ -1274,8 +1373,14 @@ function LabForm({ accent, name, onSubmit, onClose, hideClose }) {
   );
 }
 
-function LabCard({ test, accent, isBoss, onDelete }) {
+function LabCard({ test, accent, brandLabel, isBoss, onDelete }) {
   const [open, setOpen] = useState(false);
+  const downloadReport = () => {
+    const win = window.open("", "_blank");
+    if (!win) return;
+    win.document.write(buildLabReportHTML(test, brandLabel));
+    win.document.close();
+  };
   return (
     <div className="rounded-xl overflow-hidden" style={{ background: "#FFFFFF", border: `1px solid ${test.overallPass ? "#00000014" : "#D1453B55"}` }}>
       <button className="w-full px-3.5 py-3 flex items-center gap-3 text-left" onClick={() => setOpen(!open)}>
@@ -1319,11 +1424,16 @@ function LabCard({ test, accent, isBoss, onDelete }) {
           <div className="text-[10px] text-zinc-400 flex items-center gap-1 mt-3">
             <User size={9} /> Logged by {test.by} · {fmtDate(test.createdAt)}
           </div>
-          {isBoss && (
-            <button onClick={() => onDelete(test.id)} className="mt-3 flex items-center gap-1.5 text-xs text-zinc-400">
-              <Trash2 size={12} /> Remove test record
+          <div className="mt-3 flex items-center gap-4">
+            <button onClick={downloadReport} className="flex items-center gap-1.5 text-xs" style={{ color: accent }}>
+              <Download size={12} /> Download report
             </button>
-          )}
+            {isBoss && (
+              <button onClick={() => onDelete(test.id)} className="flex items-center gap-1.5 text-xs text-zinc-400">
+                <Trash2 size={12} /> Remove test record
+              </button>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -1810,15 +1920,6 @@ export default function App() {
       <div className="px-4 py-4 pb-24">
         {loading || sharedLoading ? (
           <div className="text-center text-zinc-400 text-sm py-10">Loading…</div>
-        ) : isLabOnly ? (
-          <LabForm
-            key={labResetKey}
-            accent={meta.accent}
-            name={session.name}
-            hideClose
-            onClose={() => {}}
-            onSubmit={addLabTest}
-          />
         ) : tab === "dashboard" ? (
           <Dashboard meta={meta} items={combined} batches={batches} sales={sales} canViewCosting={canViewCosting} />
         ) : tab === "items" ? (
@@ -1914,7 +2015,7 @@ export default function App() {
             )}
             <div className="space-y-2">
               {tests.map((test) => (
-                <LabCard key={test.id} test={test} accent={meta.accent} isBoss={isBoss} onDelete={deleteLabTest} />
+                <LabCard key={test.id} test={test} accent={meta.accent} brandLabel={meta.label} isBoss={isBoss} onDelete={deleteLabTest} />
               ))}
             </div>
           </>
@@ -1990,7 +2091,7 @@ export default function App() {
         </button>
       )}
 
-      {tab === "lab" && !isLabOnly && (
+      {tab === "lab" && (
         <button
           onClick={() => setShowLabForm(true)}
           className="fixed bottom-6 right-6 w-12 h-12 rounded-full flex items-center justify-center shadow-lg"
