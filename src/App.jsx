@@ -5,7 +5,7 @@ import {
   Plus, Package, AlertTriangle, Trash2, X, ChevronDown, ChevronUp,
   Truck, Clock, ArrowDownCircle, ArrowUpCircle, RotateCcw, User, History as HistoryIcon,
   Shield, LogIn, Pencil, Factory, UploadCloud, Layers, ShoppingCart, LayoutDashboard, TrendingUp,
-  FlaskConical, CheckCircle2, XCircle, Download,
+  FlaskConical, CheckCircle2, XCircle, Download, ClipboardList, ClipboardCheck, CalendarClock,
 } from "lucide-react";
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -34,6 +34,12 @@ const UNITS = ["g", "kg", "ml", "L", "units", "drums", "cartons"];
 const LABOR_RATE = 0.15;
 const CAN_RATES = { old: 3.5, new: 6 };
 const GST_RATE = 0.18;
+
+const ORDER_STATUSES = {
+  pending: { label: "Pending", color: "#D9A441" },
+  in_production: { label: "In production", color: "#3E8E86" },
+  completed: { label: "Completed", color: "#2E9E5B" },
+};
 
 const USERS = [
   { name: "Satvik", pin: "8942", role: "boss", canViewCosting: true },
@@ -355,6 +361,29 @@ function useSales(brand) {
   };
 
   return { sales, save };
+}
+
+function useOrders(brand) {
+  const [orders, setOrders] = useState([]);
+
+  useEffect(() => {
+    const ref = doc(db, "orders", brand);
+    const unsub = onSnapshot(ref, (snap) => {
+      setOrders(snap.exists() ? snap.data().orders || [] : []);
+    });
+    return () => unsub();
+  }, [brand]);
+
+  const save = async (next) => {
+    setOrders(next);
+    try {
+      await setDoc(doc(db, "orders", brand), { orders: sanitize(next) });
+    } catch (e) {
+      console.error("Failed to save orders", e);
+    }
+  };
+
+  return { orders, save };
 }
 
 function useLab(brand) {
@@ -1287,6 +1316,146 @@ function SalesCard({ sale, accent, isBoss, onDelete }) {
   );
 }
 
+function daysUntil(dateStr) {
+  if (!dateStr) return null;
+  const ms = new Date(dateStr).setHours(0, 0, 0, 0) - new Date().setHours(0, 0, 0, 0);
+  return Math.round(ms / 86400000);
+}
+
+function OrderForm({ accent, name, finishedGoods, onSubmit, onClose }) {
+  const [customerName, setCustomerName] = useState("");
+  const [productName, setProductName] = useState("");
+  const [qty, setQty] = useState("");
+  const [unit, setUnit] = useState("kg");
+  const [dueDate, setDueDate] = useState("");
+  const [notes, setNotes] = useState("");
+
+  const submit = () => {
+    if (!customerName.trim() || !productName.trim() || !qty) return;
+    onSubmit({
+      id: uid(),
+      customerName: customerName.trim(),
+      productName: productName.trim(),
+      qty: Number(qty),
+      unit,
+      dueDate: dueDate || null,
+      notes: notes.trim(),
+      status: "pending",
+      by: name,
+      createdAt: new Date().toISOString(),
+    });
+    onClose();
+  };
+
+  return (
+    <div className="rounded-xl p-4 mb-3" style={{ background: "#F3F5F4", border: "1px solid #00000012" }}>
+      <div className="flex justify-between items-center mb-3">
+        <span className="text-sm font-semibold tracking-wide" style={{ color: accent }}>NEW ORDER</span>
+        <button onClick={onClose} aria-label="Close form"><X size={16} className="text-zinc-400" /></button>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div className="col-span-2"><input placeholder="Customer name" value={customerName} onChange={(e) => setCustomerName(e.target.value)} className={inputCls} /></div>
+        <div className="col-span-2">
+          <input
+            placeholder="Product name"
+            value={productName}
+            onChange={(e) => setProductName(e.target.value)}
+            className={inputCls}
+            list="order-product-suggestions"
+          />
+          <datalist id="order-product-suggestions">
+            {finishedGoods.map((p) => <option key={p.id} value={p.name} />)}
+          </datalist>
+        </div>
+        <input placeholder="Qty ordered" type="number" value={qty} onChange={(e) => setQty(e.target.value)} className={inputCls} />
+        <select value={unit} onChange={(e) => setUnit(e.target.value)} className={inputCls}>
+          {UNITS.map((u) => <option key={u}>{u}</option>)}
+        </select>
+        <div className="col-span-2">
+          <label className="text-[10px] uppercase tracking-wide text-zinc-400 mb-1 block">Needed by (optional)</label>
+          <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className={inputCls} />
+        </div>
+        <div className="col-span-2"><textarea placeholder="Notes (optional)" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className={inputCls + " resize-none"} /></div>
+      </div>
+      <button onClick={submit} className="mt-3 w-full rounded-lg py-2 text-sm font-semibold" style={{ background: accent, color: "#ffffff" }}>
+        Log order
+      </button>
+    </div>
+  );
+}
+
+function OrderCard({ order, accent, isBoss, onUpdateStatus, onDelete }) {
+  const [open, setOpen] = useState(false);
+  const status = ORDER_STATUSES[order.status] || ORDER_STATUSES.pending;
+  const dLeft = daysUntil(order.dueDate);
+  const overdue = dLeft != null && dLeft < 0 && order.status !== "completed";
+
+  return (
+    <div className="rounded-xl overflow-hidden" style={{ background: "#FFFFFF", border: `1px solid ${overdue ? "#D1453B55" : "#00000014"}` }}>
+      <button className="w-full px-3.5 py-3 flex items-center gap-3 text-left" onClick={() => setOpen(!open)}>
+        <ClipboardList size={18} style={{ color: accent }} className="shrink-0" />
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium text-zinc-900 truncate">{order.customerName}</div>
+          <div className="text-xs text-zinc-500 mt-0.5 truncate">
+            {order.productName} · {order.qty}{order.unit}{order.dueDate ? ` · due ${order.dueDate}` : ""}
+          </div>
+        </div>
+        <span
+          className="text-[10px] font-semibold px-2 py-1 rounded-full shrink-0"
+          style={{ background: `${status.color}18`, color: status.color }}
+        >
+          {status.label}
+        </span>
+        {open ? <ChevronUp size={16} className="text-zinc-400" /> : <ChevronDown size={16} className="text-zinc-400" />}
+      </button>
+      {open && (
+        <div className="px-3.5 pb-3.5" style={{ borderTop: "1px solid #00000010" }}>
+          {overdue && (
+            <div className="flex items-center gap-1.5 mt-3 mb-1 text-[11px]" style={{ color: "#D1453B" }}>
+              <AlertTriangle size={11} /> {Math.abs(dLeft)} day{Math.abs(dLeft) !== 1 ? "s" : ""} overdue
+            </div>
+          )}
+          {!overdue && dLeft != null && order.status !== "completed" && (
+            <div className="flex items-center gap-1.5 mt-3 mb-1 text-[11px] text-zinc-500">
+              <CalendarClock size={11} /> {dLeft === 0 ? "Due today" : `Due in ${dLeft} day${dLeft !== 1 ? "s" : ""}`}
+            </div>
+          )}
+          {order.notes && (
+            <div className="mt-2 rounded-lg px-3 py-2 text-xs text-zinc-600" style={{ background: "#F7F8F7" }}>
+              {order.notes}
+            </div>
+          )}
+          <div className="text-[10px] text-zinc-400 flex items-center gap-1 mt-3">
+            <User size={9} /> Logged by {order.by} · {fmtDate(order.createdAt)}
+          </div>
+
+          <div className="flex gap-2 mt-3">
+            {Object.entries(ORDER_STATUSES).map(([key, s]) => (
+              <button
+                key={key}
+                onClick={() => onUpdateStatus(order.id, key)}
+                className="flex-1 rounded-lg py-2 text-xs font-medium"
+                style={{
+                  background: order.status === key ? `${s.color}2a` : `${s.color}15`,
+                  color: s.color,
+                }}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+
+          {isBoss && (
+            <button onClick={() => onDelete(order.id)} className="mt-3 flex items-center gap-1.5 text-xs text-zinc-400">
+              <Trash2 size={12} /> Remove order
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function LabForm({ accent, name, onSubmit, onClose, hideClose }) {
   const [testingNumber, setTestingNumber] = useState("");
   const [batchNumber, setBatchNumber] = useState("");
@@ -1614,6 +1783,104 @@ function Dashboard({ meta, items, batches, sales, canViewCosting }) {
   );
 }
 
+function ProductionPlanning({ accent, orders, items, isBoss, onUpdateStatus, onDelete }) {
+  const active = orders.filter((o) => o.status !== "completed");
+
+  const groups = {};
+  active.forEach((o) => {
+    const key = o.productName.trim().toLowerCase();
+    if (!groups[key]) groups[key] = { productName: o.productName, unit: o.unit, totalQty: 0, dueDate: null, orders: [] };
+    groups[key].totalQty += o.qty;
+    groups[key].orders.push(o);
+    if (o.dueDate && (!groups[key].dueDate || o.dueDate < groups[key].dueDate)) groups[key].dueDate = o.dueDate;
+  });
+
+  const rows = Object.values(groups).map((g) => {
+    const stockItem = items.find(
+      (i) => i.category === "Finished good" && i.name.trim().toLowerCase() === g.productName.trim().toLowerCase()
+    );
+    const available = stockItem ? stockItem.qty : 0;
+    const shortfall = Math.max(0, g.totalQty - available);
+    return { ...g, available, shortfall };
+  }).sort((a, b) => {
+    if (a.shortfall !== b.shortfall) return b.shortfall - a.shortfall;
+    if (a.dueDate && b.dueDate) return a.dueDate < b.dueDate ? -1 : 1;
+    if (a.dueDate) return -1;
+    if (b.dueDate) return 1;
+    return 0;
+  });
+
+  const queue = [...active].sort((a, b) => {
+    if (a.dueDate && b.dueDate) return a.dueDate < b.dueDate ? -1 : 1;
+    if (a.dueDate) return -1;
+    if (b.dueDate) return 1;
+    return new Date(a.createdAt) - new Date(b.createdAt);
+  });
+
+  const cardStyle = { background: "#FFFFFF", border: "1px solid #00000014" };
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-xl p-4" style={cardStyle}>
+        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-zinc-400 mb-2">
+          <ClipboardCheck size={12} /> Needs production
+        </div>
+        {rows.length === 0 ? (
+          <p className="text-xs text-zinc-400 py-2">No open orders — nothing queued for production.</p>
+        ) : (
+          <div className="space-y-2.5">
+            {rows.map((g) => {
+              const dLeft = daysUntil(g.dueDate);
+              const overdue = dLeft != null && dLeft < 0;
+              return (
+                <div key={g.productName} className="rounded-lg px-3 py-2.5" style={{ background: "#F7F8F7" }}>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-zinc-900">{g.productName}</span>
+                    {g.shortfall > 0 ? (
+                      <span className="text-xs font-semibold" style={{ color: "#D1453B" }}>
+                        Produce {g.shortfall}{g.unit}
+                      </span>
+                    ) : (
+                      <span className="text-xs font-semibold" style={{ color: "#2E9E5B" }}>Stock covers it</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-3 mt-1 text-[11px] text-zinc-500">
+                    <span>Ordered: {g.totalQty}{g.unit}</span>
+                    <span>In stock: {g.available}{g.unit}</span>
+                    {g.dueDate && (
+                      <span style={{ color: overdue ? "#D1453B" : "#6B7280" }}>
+                        {overdue ? `${Math.abs(dLeft)}d overdue` : `Due ${g.dueDate}`}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[10px] text-zinc-400 mt-1">
+                    {g.orders.length} order{g.orders.length > 1 ? "s" : ""}: {g.orders.map((o) => o.customerName).join(", ")}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-xl p-4" style={cardStyle}>
+        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-zinc-400 mb-2">
+          <ClipboardList size={12} /> Order queue
+        </div>
+        {queue.length === 0 ? (
+          <p className="text-xs text-zinc-400 py-2">No open orders.</p>
+        ) : (
+          <div className="space-y-2">
+            {queue.map((o) => (
+              <OrderCard key={o.id} order={o} accent={accent} isBoss={isBoss} onUpdateStatus={onUpdateStatus} onDelete={onDelete} />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [brand, setBrand] = useState("urbnfettch");
   const [tab, setTab] = useState("items");
@@ -1622,12 +1889,14 @@ export default function App() {
   const [showProdForm, setShowProdForm] = useState(false);
   const [showSalesForm, setShowSalesForm] = useState(false);
   const [showLabForm, setShowLabForm] = useState(false);
+  const [showOrderForm, setShowOrderForm] = useState(false);
   const [filter, setFilter] = useState("All");
   const { items, save, loading } = useInventory(brand);
   const { items: sharedItems, save: saveShared, loading: sharedLoading } = useSharedInventory();
   const { batches, save: saveBatches } = useProduction(brand);
   const { sales, save: saveSales } = useSales(brand);
   const { tests, save: saveTests } = useLab(brand);
+  const { orders, save: saveOrders } = useOrders(brand);
   const { session, save: saveSession } = useSession();
   const { logins, record } = useLoginLog();
   const meta = BRANDS[brand];
@@ -1823,6 +2092,13 @@ export default function App() {
     saveTests(tests.filter((t) => t.id !== id));
   };
 
+  const addOrder = (order) => saveOrders([order, ...orders]);
+  const updateOrderStatus = (id, status) => saveOrders(orders.map((o) => (o.id === id ? { ...o, status } : o)));
+  const deleteOrder = (id) => {
+    if (!isBoss) return;
+    saveOrders(orders.filter((o) => o.id !== id));
+  };
+
   if (!session) return <PinGate onLogin={handleLogin} />;
 
   return (
@@ -1870,6 +2146,8 @@ export default function App() {
           : [
               { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
               { key: "items", label: "Items", icon: Package },
+              { key: "orders", label: "Orders", icon: ClipboardList },
+              { key: "planning", label: "Production Planning", icon: ClipboardCheck },
               { key: "production", label: "Production", icon: Factory },
               { key: "sales", label: "Sales", icon: ShoppingCart },
               ...(canSeeLabTab ? [{ key: "lab", label: "Lab", icon: FlaskConical }] : []),
@@ -1948,6 +2226,39 @@ export default function App() {
               ))}
             </div>
           </>
+        ) : tab === "orders" ? (
+          <>
+            {showOrderForm && (
+              <OrderForm
+                accent={meta.accent}
+                name={session.name}
+                finishedGoods={finishedGoods}
+                onClose={() => setShowOrderForm(false)}
+                onSubmit={addOrder}
+              />
+            )}
+            {orders.length === 0 && !showOrderForm && (
+              <div className="text-center py-14">
+                <ClipboardList size={28} className="mx-auto text-zinc-300 mb-2" />
+                <p className="text-sm text-zinc-500">No orders logged yet for {meta.label}.</p>
+                <p className="text-xs text-zinc-400 mt-1">Tap + to log a new customer order.</p>
+              </div>
+            )}
+            <div className="space-y-2">
+              {orders.map((order) => (
+                <OrderCard key={order.id} order={order} accent={meta.accent} isBoss={isBoss} onUpdateStatus={updateOrderStatus} onDelete={deleteOrder} />
+              ))}
+            </div>
+          </>
+        ) : tab === "planning" ? (
+          <ProductionPlanning
+            accent={meta.accent}
+            orders={orders}
+            items={combined}
+            isBoss={isBoss}
+            onUpdateStatus={updateOrderStatus}
+            onDelete={deleteOrder}
+          />
         ) : tab === "production" ? (
           <>
             {showProdForm && (
@@ -2064,6 +2375,17 @@ export default function App() {
           className="fixed bottom-6 right-6 w-12 h-12 rounded-full flex items-center justify-center shadow-lg"
           style={{ background: meta.accent }}
           aria-label="Add new item"
+        >
+          <Plus size={22} color="#ffffff" strokeWidth={2.5} />
+        </button>
+      )}
+
+      {tab === "orders" && (
+        <button
+          onClick={() => setShowOrderForm(true)}
+          className="fixed bottom-6 right-6 w-12 h-12 rounded-full flex items-center justify-center shadow-lg"
+          style={{ background: meta.accent }}
+          aria-label="Log new order"
         >
           <Plus size={22} color="#ffffff" strokeWidth={2.5} />
         </button>
