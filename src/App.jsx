@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { doc, onSnapshot, setDoc } from "firebase/firestore";
-import { db } from "./firebase";
+import { onAuthStateChanged, signInAnonymously } from "firebase/auth";
+import { db, auth } from "./firebase";
 import {
   Plus, Package, AlertTriangle, Trash2, X, ChevronDown, ChevronUp,
   Truck, Clock, ArrowDownCircle, ArrowUpCircle, RotateCcw, User, History as HistoryIcon,
@@ -433,6 +434,27 @@ function useLoginLog() {
   };
 
   return { logins, record };
+}
+
+function useAnonAuth() {
+  const [ready, setReady] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        setReady(true);
+      } else {
+        signInAnonymously(auth).catch((e) => {
+          console.error("Anonymous sign-in failed", e);
+          setError(e.message);
+        });
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  return { ready, error };
 }
 
 function useSession() {
@@ -1885,6 +1907,28 @@ function ProductionPlanning({ accent, orders, items, isBoss, onUpdateStatus, onD
 }
 
 export default function App() {
+  const { ready: authReady, error: authError } = useAnonAuth();
+
+  if (authError) {
+    return (
+      <div className="min-h-screen w-full flex items-center justify-center px-6 text-center" style={{ background: "#ffffff", fontFamily: "'Inter', system-ui, sans-serif" }}>
+        <p className="text-sm text-zinc-500">Couldn't connect. Check your internet connection and reload.</p>
+      </div>
+    );
+  }
+
+  if (!authReady) {
+    return (
+      <div className="min-h-screen w-full flex items-center justify-center" style={{ background: "#ffffff" }}>
+        <p className="text-sm text-zinc-400">Loading…</p>
+      </div>
+    );
+  }
+
+  return <AuthenticatedApp />;
+}
+
+function AuthenticatedApp() {
   const [brand, setBrand] = useState("urbnfettch");
   const [tab, setTab] = useState("items");
   const [showForm, setShowForm] = useState(false);
