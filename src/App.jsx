@@ -47,6 +47,7 @@ const USERS = [
   { name: "Vijay", pin: "2314", role: "staff", canViewCosting: false },
   { name: "Jyoti", pin: "3214", role: "staff", canViewCosting: false },
   { name: "Mohit", pin: "4213", role: "lab", canViewCosting: false },
+  { name: "Kishore", pin: "9876", role: "homecare_orders", canViewCosting: false },
 ];
 
 function uid() {
@@ -1429,21 +1430,23 @@ function OrderCard({ order, accent, isBoss, onUpdateStatus, onDelete }) {
             <User size={9} /> Logged by {order.by} · {fmtDate(order.createdAt)}
           </div>
 
-          <div className="flex gap-2 mt-3">
-            {Object.entries(ORDER_STATUSES).map(([key, s]) => (
-              <button
-                key={key}
-                onClick={() => onUpdateStatus(order.id, key)}
-                className="flex-1 rounded-lg py-2 text-xs font-medium"
-                style={{
-                  background: order.status === key ? `${s.color}2a` : `${s.color}15`,
-                  color: s.color,
-                }}
-              >
-                {s.label}
-              </button>
-            ))}
-          </div>
+          {onUpdateStatus && (
+            <div className="flex gap-2 mt-3">
+              {Object.entries(ORDER_STATUSES).map(([key, s]) => (
+                <button
+                  key={key}
+                  onClick={() => onUpdateStatus(order.id, key)}
+                  className="flex-1 rounded-lg py-2 text-xs font-medium"
+                  style={{
+                    background: order.status === key ? `${s.color}2a` : `${s.color}15`,
+                    color: s.color,
+                  }}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          )}
 
           {isBoss && (
             <button onClick={() => onDelete(order.id)} className="mt-3 flex items-center gap-1.5 text-xs text-zinc-400">
@@ -1904,11 +1907,16 @@ export default function App() {
   const isBoss = session?.role === "boss";
   const canViewCosting = !!session?.canViewCosting;
   const isLabOnly = session?.role === "lab";
+  const isHomecareOrdersOnly = session?.role === "homecare_orders";
   const canSeeLabTab = canViewCosting || isLabOnly;
   const [labResetKey, setLabResetKey] = useState(0);
 
   useEffect(() => {
     if (session?.role === "lab") setTab("lab");
+    if (session?.role === "homecare_orders") {
+      setTab("orders");
+      setBrand("homecare");
+    }
   }, [session]);
 
   const handleLogin = (user) => {
@@ -1922,6 +1930,7 @@ export default function App() {
   const visible = filter === "All" ? combined : filter === "Low stock" ? lowStock : combined.filter((i) => i.category === filter);
   const rawMaterials = combined.filter((i) => i.category === "Raw material");
   const finishedGoods = combined.filter((i) => i.category === "Finished good");
+  const visibleOrders = isHomecareOrdersOnly ? orders.filter((o) => o.by === session.name) : orders;
 
   const allHistory = useMemo(() => {
     const rows = [];
@@ -2111,27 +2120,29 @@ export default function App() {
             <User size={11} /> {session.name}
           </button>
         </div>
-        <div className="flex gap-2">
-          {Object.entries(BRANDS).map(([key, b]) => (
-            <button
-              key={key}
-              onClick={() => { setBrand(key); setFilter("All"); }}
-              className="flex-1 text-left rounded-xl px-3 py-2.5 transition-colors"
-              style={{
-                background: brand === key ? b.accentDim : "#F7F8F7",
-                border: `1px solid ${brand === key ? b.accent : "#00000012"}`,
-              }}
-            >
-              <div className="text-sm font-bold" style={{ color: brand === key ? b.accent : "#6B7280" }}>
-                {b.label}
-              </div>
-              <div className="text-[10px] text-zinc-500 mt-0.5 leading-tight">{b.sub}</div>
-            </button>
-          ))}
-        </div>
+        {!isHomecareOrdersOnly && (
+          <div className="flex gap-2">
+            {Object.entries(BRANDS).map(([key, b]) => (
+              <button
+                key={key}
+                onClick={() => { setBrand(key); setFilter("All"); }}
+                className="flex-1 text-left rounded-xl px-3 py-2.5 transition-colors"
+                style={{
+                  background: brand === key ? b.accentDim : "#F7F8F7",
+                  border: `1px solid ${brand === key ? b.accent : "#00000012"}`,
+                }}
+              >
+                <div className="text-sm font-bold" style={{ color: brand === key ? b.accent : "#6B7280" }}>
+                  {b.label}
+                </div>
+                <div className="text-[10px] text-zinc-500 mt-0.5 leading-tight">{b.sub}</div>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
-      {lowStock.length > 0 && (
+      {lowStock.length > 0 && !isHomecareOrdersOnly && (
         <div className="mx-4 mt-3 rounded-lg px-3 py-2 flex items-center gap-2" style={{ background: "#D1453B14", border: "1px solid #D1453B30" }}>
           <AlertTriangle size={14} style={{ color: "#D1453B" }} />
           <span className="text-xs text-zinc-700">
@@ -2143,6 +2154,8 @@ export default function App() {
       <div className="flex gap-1 px-4 mt-4 overflow-x-auto">
         {(isLabOnly
           ? [{ key: "lab", label: "Lab", icon: FlaskConical }]
+          : isHomecareOrdersOnly
+          ? [{ key: "orders", label: "Orders", icon: ClipboardList }]
           : [
               { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
               { key: "items", label: "Items", icon: Package },
@@ -2237,16 +2250,25 @@ export default function App() {
                 onSubmit={addOrder}
               />
             )}
-            {orders.length === 0 && !showOrderForm && (
+            {visibleOrders.length === 0 && !showOrderForm && (
               <div className="text-center py-14">
                 <ClipboardList size={28} className="mx-auto text-zinc-300 mb-2" />
-                <p className="text-sm text-zinc-500">No orders logged yet for {meta.label}.</p>
+                <p className="text-sm text-zinc-500">
+                  {isHomecareOrdersOnly ? "You haven't logged any orders yet." : `No orders logged yet for ${meta.label}.`}
+                </p>
                 <p className="text-xs text-zinc-400 mt-1">Tap + to log a new customer order.</p>
               </div>
             )}
             <div className="space-y-2">
-              {orders.map((order) => (
-                <OrderCard key={order.id} order={order} accent={meta.accent} isBoss={isBoss} onUpdateStatus={updateOrderStatus} onDelete={deleteOrder} />
+              {visibleOrders.map((order) => (
+                <OrderCard
+                  key={order.id}
+                  order={order}
+                  accent={meta.accent}
+                  isBoss={isBoss}
+                  onUpdateStatus={isHomecareOrdersOnly ? null : updateOrderStatus}
+                  onDelete={deleteOrder}
+                />
               ))}
             </div>
           </>
