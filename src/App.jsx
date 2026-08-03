@@ -1345,22 +1345,33 @@ function daysUntil(dateStr) {
   return Math.round(ms / 86400000);
 }
 
+// Orders logged before multi-item support only have productName/qty/unit
+// directly on the order; normalize those into the same items[] shape.
+function getOrderItems(order) {
+  if (order.items && order.items.length > 0) return order.items;
+  return [{ id: order.id, productName: order.productName, qty: order.qty, unit: order.unit }];
+}
+
 function OrderForm({ accent, name, finishedGoods, onSubmit, onClose }) {
   const [customerName, setCustomerName] = useState("");
-  const [productName, setProductName] = useState("");
-  const [qty, setQty] = useState("");
-  const [unit, setUnit] = useState("kg");
   const [dueDate, setDueDate] = useState("");
   const [notes, setNotes] = useState("");
+  const [rows, setRows] = useState([{ id: uid(), productName: "", qty: "", unit: "kg" }]);
+
+  const addRow = () => setRows([...rows, { id: uid(), productName: "", qty: "", unit: "kg" }]);
+  const removeRow = (id) => setRows(rows.filter((r) => r.id !== id));
+  const updateRow = (id, patch) => setRows(rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
 
   const submit = () => {
-    if (!customerName.trim() || !productName.trim() || !qty) return;
+    if (!customerName.trim()) return;
+    const items = rows
+      .filter((r) => r.productName.trim() && r.qty)
+      .map((r) => ({ id: uid(), productName: r.productName.trim(), qty: Number(r.qty), unit: r.unit }));
+    if (items.length === 0) return;
     onSubmit({
       id: uid(),
       customerName: customerName.trim(),
-      productName: productName.trim(),
-      qty: Number(qty),
-      unit,
+      items,
       dueDate: dueDate || null,
       notes: notes.trim(),
       status: "pending",
@@ -1376,30 +1387,58 @@ function OrderForm({ accent, name, finishedGoods, onSubmit, onClose }) {
         <span className="text-sm font-semibold tracking-wide" style={{ color: accent }}>NEW ORDER</span>
         <button onClick={onClose} aria-label="Close form"><X size={16} className="text-zinc-400" /></button>
       </div>
-      <div className="grid grid-cols-2 gap-2">
-        <div className="col-span-2"><input placeholder="Customer name" value={customerName} onChange={(e) => setCustomerName(e.target.value)} className={inputCls} /></div>
-        <div className="col-span-2">
-          <input
-            placeholder="Product name"
-            value={productName}
-            onChange={(e) => setProductName(e.target.value)}
-            className={inputCls}
-            list="order-product-suggestions"
-          />
-          <datalist id="order-product-suggestions">
-            {finishedGoods.map((p) => <option key={p.id} value={p.name} />)}
-          </datalist>
+      <div className="col-span-2"><input placeholder="Customer name" value={customerName} onChange={(e) => setCustomerName(e.target.value)} className={inputCls} /></div>
+
+      <div className="mt-3">
+        <div className="text-[10px] uppercase tracking-wide text-zinc-400 mb-1.5">Items ordered</div>
+        <div className="space-y-2">
+          {rows.map((row) => (
+            <div key={row.id} className="flex gap-2">
+              <input
+                placeholder="Product name"
+                value={row.productName}
+                onChange={(e) => updateRow(row.id, { productName: e.target.value })}
+                className={inputCls + " flex-1"}
+                list="order-product-suggestions"
+              />
+              <input
+                placeholder="Qty"
+                type="number"
+                value={row.qty}
+                onChange={(e) => updateRow(row.id, { qty: e.target.value })}
+                className={inputCls}
+                style={{ maxWidth: "5.5rem" }}
+              />
+              <select
+                value={row.unit}
+                onChange={(e) => updateRow(row.id, { unit: e.target.value })}
+                className={inputCls}
+                style={{ maxWidth: "5.5rem" }}
+              >
+                {UNITS.map((u) => <option key={u}>{u}</option>)}
+              </select>
+              {rows.length > 1 && (
+                <button onClick={() => removeRow(row.id)} aria-label="Remove item" className="shrink-0">
+                  <X size={16} className="text-zinc-400" />
+                </button>
+              )}
+            </div>
+          ))}
         </div>
-        <input placeholder="Qty ordered" type="number" value={qty} onChange={(e) => setQty(e.target.value)} className={inputCls} />
-        <select value={unit} onChange={(e) => setUnit(e.target.value)} className={inputCls}>
-          {UNITS.map((u) => <option key={u}>{u}</option>)}
-        </select>
-        <div className="col-span-2">
-          <label className="text-[10px] uppercase tracking-wide text-zinc-400 mb-1 block">Needed by (optional)</label>
-          <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className={inputCls} />
-        </div>
-        <div className="col-span-2"><textarea placeholder="Notes (optional)" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className={inputCls + " resize-none"} /></div>
+        <datalist id="order-product-suggestions">
+          {finishedGoods.map((p) => <option key={p.id} value={p.name} />)}
+        </datalist>
+        <button onClick={addRow} className="mt-2 text-xs flex items-center gap-1" style={{ color: accent }}>
+          <Plus size={12} /> Add item
+        </button>
       </div>
+
+      <div className="mt-3">
+        <label className="text-[10px] uppercase tracking-wide text-zinc-400 mb-1 block">Needed by (optional)</label>
+        <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className={inputCls} />
+      </div>
+      <div className="mt-2"><textarea placeholder="Notes (optional)" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className={inputCls + " resize-none"} /></div>
+
       <button onClick={submit} className="mt-3 w-full rounded-lg py-2 text-sm font-semibold" style={{ background: accent, color: "#ffffff" }}>
         Log order
       </button>
@@ -1412,6 +1451,8 @@ function OrderCard({ order, accent, isBoss, onUpdateStatus, onDelete }) {
   const status = ORDER_STATUSES[order.status] || ORDER_STATUSES.pending;
   const dLeft = daysUntil(order.dueDate);
   const overdue = dLeft != null && dLeft < 0 && order.status !== "completed";
+  const items = getOrderItems(order);
+  const summary = items.map((it) => `${it.productName} ×${it.qty}${it.unit}`).join(", ");
 
   return (
     <div className="rounded-xl overflow-hidden" style={{ background: "#FFFFFF", border: `1px solid ${overdue ? "#D1453B55" : "#00000014"}` }}>
@@ -1420,7 +1461,7 @@ function OrderCard({ order, accent, isBoss, onUpdateStatus, onDelete }) {
         <div className="min-w-0 flex-1">
           <div className="text-sm font-medium text-zinc-900 truncate">{order.customerName}</div>
           <div className="text-xs text-zinc-500 mt-0.5 truncate">
-            {order.productName} · {order.qty}{order.unit}{order.dueDate ? ` · due ${order.dueDate}` : ""}
+            {summary}{order.dueDate ? ` · due ${order.dueDate}` : ""}
           </div>
         </div>
         <span
@@ -1443,6 +1484,17 @@ function OrderCard({ order, accent, isBoss, onUpdateStatus, onDelete }) {
               <CalendarClock size={11} /> {dLeft === 0 ? "Due today" : `Due in ${dLeft} day${dLeft !== 1 ? "s" : ""}`}
             </div>
           )}
+
+          <div className="mt-2 text-[10px] uppercase tracking-wide text-zinc-400 mb-1">Items ordered</div>
+          <div className="space-y-1">
+            {items.map((it, i) => (
+              <div key={it.id || i} className="flex items-center justify-between text-xs text-zinc-600">
+                <span>{it.productName}</span>
+                <span className="mono-font">{it.qty}{it.unit}</span>
+              </div>
+            ))}
+          </div>
+
           {order.notes && (
             <div className="mt-2 rounded-lg px-3 py-2 text-xs text-zinc-600" style={{ background: "#F7F8F7" }}>
               {order.notes}
@@ -1813,11 +1865,13 @@ function ProductionPlanning({ accent, orders, items, isBoss, onUpdateStatus, onD
 
   const groups = {};
   active.forEach((o) => {
-    const key = o.productName.trim().toLowerCase();
-    if (!groups[key]) groups[key] = { productName: o.productName, unit: o.unit, totalQty: 0, dueDate: null, orders: [] };
-    groups[key].totalQty += o.qty;
-    groups[key].orders.push(o);
-    if (o.dueDate && (!groups[key].dueDate || o.dueDate < groups[key].dueDate)) groups[key].dueDate = o.dueDate;
+    getOrderItems(o).forEach((item) => {
+      const key = item.productName.trim().toLowerCase();
+      if (!groups[key]) groups[key] = { productName: item.productName, unit: item.unit, totalQty: 0, dueDate: null, orders: [] };
+      groups[key].totalQty += item.qty;
+      if (!groups[key].orders.some((x) => x.id === o.id)) groups[key].orders.push(o);
+      if (o.dueDate && (!groups[key].dueDate || o.dueDate < groups[key].dueDate)) groups[key].dueDate = o.dueDate;
+    });
   });
 
   const rows = Object.values(groups).map((g) => {
