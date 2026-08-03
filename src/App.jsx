@@ -243,8 +243,10 @@ function addStockInLot(item, qty, price) {
   let lots = item.lots ? [...item.lots] : [];
   if (!hasLots) {
     // Starting lot tracking now — carry the existing untracked qty
-    // forward as a zero-cost lot so it isn't lost.
-    if (item.qty > 0) lots.push({ id: uid(), qty: item.qty, price: 0, date: new Date().toISOString() });
+    // forward as a lot at its known flat cost (0 only if that was never
+    // set either), so it isn't valued at ₹0 once lots become the source
+    // of truth for this item's cost.
+    if (item.qty > 0) lots.push({ id: uid(), qty: item.qty, price: item.costPerUnit || 0, date: new Date().toISOString() });
   }
   if (price) {
     lots.push({ id: uid(), qty, price: Number(price), date: new Date().toISOString() });
@@ -1211,8 +1213,10 @@ function ProductionForm({ accent, name, rawMaterials, containers, onSubmit, onCl
   );
 }
 
-function ProductionCard({ batch, accent, isBoss, canViewCosting, onDelete }) {
+function ProductionCard({ batch, accent, isBoss, canViewCosting, onDelete, onUpdateCosting }) {
   const [open, setOpen] = useState(false);
+  const [editingCosting, setEditingCosting] = useState(false);
+  const [priceEdits, setPriceEdits] = useState({});
   const c = batch.costing || {};
   const materialCost = c.materialCost || 0;
   const laborCost = c.laborCost || 0;
@@ -1223,6 +1227,24 @@ function ProductionCard({ batch, accent, isBoss, canViewCosting, onDelete }) {
   const costPerKgWithGst = c.costPerKgWithGst != null
     ? c.costPerKgWithGst
     : (batch.outputQty > 0 ? (totalCost + gstAmount) / batch.outputQty : 0);
+
+  const startEditingCosting = () => {
+    const init = {};
+    (batch.materials || []).forEach((m) => {
+      init[m.itemId] = m.unitCostUsed != null ? String(m.unitCostUsed) : "0";
+    });
+    setPriceEdits(init);
+    setEditingCosting(true);
+  };
+
+  const saveCosting = () => {
+    const prices = {};
+    Object.entries(priceEdits).forEach(([itemId, val]) => {
+      prices[itemId] = Number(val) || 0;
+    });
+    onUpdateCosting(batch.id, prices);
+    setEditingCosting(false);
+  };
 
   return (
     <div className="rounded-xl overflow-hidden" style={{ background: "#FFFFFF", border: "1px solid #00000014" }}>
@@ -1264,6 +1286,41 @@ function ProductionCard({ batch, accent, isBoss, canViewCosting, onDelete }) {
               </div>
             )}
           </div>
+
+          {isBoss && canViewCosting && !editingCosting && (batch.materials || []).length > 0 && (
+            <button onClick={startEditingCosting} className="mt-2 flex items-center gap-1.5 text-xs" style={{ color: accent }}>
+              <Pencil size={12} /> Correct raw material prices
+            </button>
+          )}
+
+          {editingCosting && (
+            <div className="mt-2 rounded-lg p-3" style={{ background: "#F3F5F4", border: "1px solid #00000012" }}>
+              <div className="text-[10px] uppercase tracking-wide text-zinc-400 mb-2">Correct ₹/unit used for this batch</div>
+              <div className="space-y-2">
+                {(batch.materials || []).map((m) => (
+                  <div key={m.itemId} className="flex items-center gap-2">
+                    <span className="text-xs text-zinc-600 flex-1 truncate">{m.itemName}</span>
+                    <input
+                      type="number"
+                      value={priceEdits[m.itemId] ?? ""}
+                      onChange={(e) => setPriceEdits({ ...priceEdits, [m.itemId]: e.target.value })}
+                      className={inputCls}
+                      style={{ maxWidth: "6rem" }}
+                      placeholder={`₹/${m.unit}`}
+                    />
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-2 mt-3">
+                <button onClick={saveCosting} className="flex-1 rounded-lg py-2 text-xs font-semibold" style={{ background: accent, color: "#ffffff" }}>
+                  Save
+                </button>
+                <button onClick={() => setEditingCosting(false)} className="flex-1 rounded-lg py-2 text-xs font-medium text-zinc-500" style={{ background: "#00000008" }}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
 
           {canViewCosting && (
             <div className="mt-3 rounded-lg px-3 py-2.5" style={{ background: "#F7F8F7" }}>
@@ -2293,6 +2350,33 @@ function AuthenticatedApp() {
     saveBatches(batches.filter((b) => b.id !== id));
   };
 
+  // Corrects the recorded ₹/unit for a batch's materials after the fact
+  // (e.g. it was logged as ₹0 due to a missing price at the time) and
+  // recomputes that batch's costing. Does not touch live inventory stock.
+  const updateBatchCosting = (batchId, prices) => {
+    if (!isBoss) return;
+    saveBatches(
+      batches.map((b) => {
+        if (b.id !== batchId) return b;
+        const materials = (b.materials || []).map((m) =>
+          prices[m.itemId] != null ? { ...m, unitCostUsed: prices[m.itemId] } : m
+        );
+        const materialCost = materials.reduce((s, m) => s + m.qty * (m.unitCostUsed || 0), 0);
+        const laborCost = materialCost * LABOR_RATE;
+        const canCost = b.costing?.canCost || 0;
+        const totalCost = materialCost + laborCost + canCost;
+        const costPerKg = b.outputQty > 0 ? totalCost / b.outputQty : 0;
+        const gstAmount = totalCost * GST_RATE;
+        const costPerKgWithGst = b.outputQty > 0 ? (totalCost + gstAmount) / b.outputQty : 0;
+        return {
+          ...b,
+          materials,
+          costing: { materialCost, laborCost, canCost, totalCost, costPerKg, gstAmount, costPerKgWithGst },
+        };
+      })
+    );
+  };
+
   const sellStock = (sale) => {
     const inBrandIdx = items.findIndex((i) => i.id === sale.productId);
     const inSharedIdx = sharedItems.findIndex((i) => i.id === sale.productId);
@@ -2534,7 +2618,7 @@ function AuthenticatedApp() {
             )}
             <div className="space-y-2">
               {batches.map((batch) => (
-                <ProductionCard key={batch.id} batch={batch} accent={meta.accent} isBoss={isBoss} canViewCosting={canViewCosting} onDelete={deleteBatch} />
+                <ProductionCard key={batch.id} batch={batch} accent={meta.accent} isBoss={isBoss} canViewCosting={canViewCosting} onDelete={deleteBatch} onUpdateCosting={updateBatchCosting} />
               ))}
             </div>
           </>
