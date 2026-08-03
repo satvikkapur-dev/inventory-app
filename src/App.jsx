@@ -33,7 +33,6 @@ const BRANDS = {
 const CATEGORIES = ["Raw material", "Packaging", "Finished good"];
 const UNITS = ["g", "kg", "ml", "L", "units", "drums", "cartons"];
 const LABOR_RATE = 0.15;
-const CAN_RATES = { old: 3.5, new: 6 };
 const GST_RATE = 0.18;
 
 const ORDER_STATUSES = {
@@ -231,15 +230,28 @@ function addStockInLot(item, qty, price) {
   if (item.category !== "Raw material") {
     return { qty: item.qty + qty, lots: item.lots || null };
   }
+  const hasLots = item.lots && item.lots.length > 0;
+
+  // No lot tracking yet and no price given now — just bump the flat qty.
+  // (Fabricating a lots array here would silently discard the item's
+  // existing untracked quantity, since consumers derive qty from lots
+  // once any exist.)
+  if (!hasLots && !price) {
+    return { qty: item.qty + qty, lots: item.lots || null };
+  }
+
   let lots = item.lots ? [...item.lots] : [];
+  if (!hasLots) {
+    // Starting lot tracking now — carry the existing untracked qty
+    // forward as a zero-cost lot so it isn't lost.
+    if (item.qty > 0) lots.push({ id: uid(), qty: item.qty, price: 0, date: new Date().toISOString() });
+  }
   if (price) {
     lots.push({ id: uid(), qty, price: Number(price), date: new Date().toISOString() });
-  } else if (lots.length > 0) {
+  } else {
     const last = { ...lots[lots.length - 1] };
     last.qty += qty;
     lots[lots.length - 1] = last;
-  } else {
-    lots.push({ id: uid(), qty, price: 0, date: new Date().toISOString() });
   }
   const newQty = lots.reduce((s, l) => s + l.qty, 0);
   return { qty: newQty, lots };
@@ -554,11 +566,13 @@ function ItemForm({ accent, name, canViewCosting, onAdd, onClose }) {
   const [leadTime, setLeadTime] = useState("");
   const [shared, setShared] = useState(false);
   const [costPerUnit, setCostPerUnit] = useState("");
+  const [capacityKg, setCapacityKg] = useState("");
 
   const submit = () => {
     if (!nm.trim() || !qty || !threshold) return;
     const q = Number(qty);
     const isRaw = category === "Raw material";
+    const isPackaging = category === "Packaging";
     const price = costPerUnit ? Number(costPerUnit) : 0;
     onAdd({
       id: uid(),
@@ -569,6 +583,7 @@ function ItemForm({ accent, name, canViewCosting, onAdd, onClose }) {
       threshold: Number(threshold),
       shared,
       costPerUnit: price,
+      capacityKg: isPackaging && capacityKg ? Number(capacityKg) : null,
       lots: isRaw && price ? [{ id: uid(), qty: q, price, date: new Date().toISOString() }] : null,
       supplier: {
         name: supplierName.trim(),
@@ -610,6 +625,13 @@ function ItemForm({ accent, name, canViewCosting, onAdd, onClose }) {
           </div>
         )}
 
+        {category === "Packaging" && (
+          <div className="col-span-2">
+            <input placeholder="Capacity per unit (kg) — e.g. 50 for a can that holds 50kg" type="number" value={capacityKg} onChange={(e) => setCapacityKg(e.target.value)} className={inputCls} />
+            <p className="text-[10px] text-zinc-400 mt-1">Set this if this item is a container (can/drum) used to package production output — lets Production auto-deduct the right number of units.</p>
+          </div>
+        )}
+
         <label className="col-span-2 flex items-center gap-2 text-xs text-zinc-600 mt-1">
           <input type="checkbox" checked={shared} onChange={(e) => setShared(e.target.checked)} className="w-3.5 h-3.5" />
           Shared material — same stock used by both Rubber Div and Homecare
@@ -637,6 +659,7 @@ function EditItemForm({ accent, item, canViewCosting, onSave, onClose }) {
   const [leadTime, setLeadTime] = useState(item.supplier?.leadTime != null ? String(item.supplier.leadTime) : "");
   const [shared, setShared] = useState(!!item.shared);
   const [costPerUnit, setCostPerUnit] = useState(item.costPerUnit != null ? String(item.costPerUnit) : "");
+  const [capacityKg, setCapacityKg] = useState(item.capacityKg != null ? String(item.capacityKg) : "");
   const [lots, setLots] = useState(item.lots ? item.lots.map((l) => ({ ...l })) : []);
   const [newLotQty, setNewLotQty] = useState("");
   const [newLotPrice, setNewLotPrice] = useState("");
@@ -665,6 +688,7 @@ function EditItemForm({ accent, item, canViewCosting, onSave, onClose }) {
       shared,
       qty: usingLots ? totalLotQty : item.qty,
       costPerUnit: costPerUnit ? Number(costPerUnit) : item.costPerUnit || 0,
+      capacityKg: category === "Packaging" && capacityKg ? Number(capacityKg) : null,
       lots: showLots ? lots.map((l) => ({ ...l, qty: Number(l.qty), price: Number(l.price) })) : (item.lots || null),
       supplier: {
         name: supplierName.trim(),
@@ -696,6 +720,13 @@ function EditItemForm({ accent, item, canViewCosting, onSave, onClose }) {
 
         {!showLots && canViewCosting && (
           <div className="col-span-2"><input placeholder="Cost per unit (₹)" type="number" value={costPerUnit} onChange={(e) => setCostPerUnit(e.target.value)} className={inputCls} /></div>
+        )}
+
+        {category === "Packaging" && (
+          <div className="col-span-2">
+            <input placeholder="Capacity per unit (kg) — e.g. 50 for a can that holds 50kg" type="number" value={capacityKg} onChange={(e) => setCapacityKg(e.target.value)} className={inputCls} />
+            <p className="text-[10px] text-zinc-400 mt-1">Set this if this item is a container (can/drum) used to package production output.</p>
+          </div>
         )}
 
         <label className="col-span-2 flex items-center gap-2 text-xs text-zinc-600 mt-1">
@@ -854,6 +885,9 @@ function ItemCard({ item, accent, name, isBoss, canViewCosting, onUpdate, onDele
             {item.category}{item.supplier?.name ? ` · ${item.supplier.name}` : ""}
             {item.shared && (
               <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full shrink-0" style={{ background: "#3E8E8618", color: "#3E8E86" }}>SHARED</span>
+            )}
+            {item.category === "Packaging" && item.capacityKg > 0 && (
+              <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full shrink-0" style={{ background: "#59A24918", color: LIGHT_GREEN }}>{item.capacityKg}kg/unit</span>
             )}
             {canViewCosting && avg > 0 && (
               <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full shrink-0" style={{ background: "#15583014", color: DARK_GREEN }}>
@@ -1048,19 +1082,22 @@ function BulkImportForm({ accent, name, onImport, onClose }) {
   );
 }
 
-function ProductionForm({ accent, name, rawMaterials, onSubmit, onClose }) {
+function ProductionForm({ accent, name, rawMaterials, containers, onSubmit, onClose }) {
   const [productName, setProductName] = useState("");
   const [batchNumber, setBatchNumber] = useState("");
   const [date, setDate] = useState(todayStr());
   const [machineNumber, setMachineNumber] = useState("");
   const [outputQty, setOutputQty] = useState("");
   const [outputUnit, setOutputUnit] = useState("kg");
-  const [canUsed, setCanUsed] = useState("none");
+  const [containerId, setContainerId] = useState("");
   const [rows, setRows] = useState([{ id: uid(), itemId: "", qty: "" }]);
 
   const addRow = () => setRows([...rows, { id: uid(), itemId: "", qty: "" }]);
   const removeRow = (id) => setRows(rows.filter((r) => r.id !== id));
   const updateRow = (id, patch) => setRows(rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+
+  const selectedContainer = containers.find((c) => c.id === containerId);
+  const unitsNeeded = selectedContainer && outputQty ? Math.ceil(Number(outputQty) / selectedContainer.capacityKg) : 0;
 
   const submit = () => {
     if (!productName.trim() || !batchNumber.trim() || !outputQty) return;
@@ -1082,7 +1119,7 @@ function ProductionForm({ accent, name, rawMaterials, onSubmit, onClose }) {
       outputQty: Number(outputQty),
       outputUnit,
       materials,
-      canUsed,
+      containerId: containerId || null,
       by: name,
       createdAt: new Date().toISOString(),
     });
@@ -1108,11 +1145,20 @@ function ProductionForm({ accent, name, rawMaterials, onSubmit, onClose }) {
           </select>
         </div>
         <div className="col-span-2">
-          <select value={canUsed} onChange={(e) => setCanUsed(e.target.value)} className={inputCls}>
-            <option value="none">No can / not applicable</option>
-            <option value="old">Old can (₹{CAN_RATES.old}/kg)</option>
-            <option value="new">New can (₹{CAN_RATES.new}/kg)</option>
+          <select value={containerId} onChange={(e) => setContainerId(e.target.value)} className={inputCls}>
+            <option value="">No container / not applicable</option>
+            {containers.map((c) => (
+              <option key={c.id} value={c.id}>{c.name} ({c.capacityKg}kg/unit · {c.qty} available)</option>
+            ))}
           </select>
+          {containers.length === 0 && (
+            <p className="text-[10px] text-zinc-400 mt-1">No container items set up — add a Packaging item with a capacity (kg) in the Items tab to track can usage here.</p>
+          )}
+          {selectedContainer && outputQty && (
+            <p className="text-[10px] text-zinc-500 mt-1">
+              Will deduct {unitsNeeded} unit{unitsNeeded !== 1 ? "s" : ""} of {selectedContainer.name} ({selectedContainer.qty} in stock).
+            </p>
+          )}
         </div>
       </div>
 
@@ -1206,6 +1252,17 @@ function ProductionCard({ batch, accent, isBoss, canViewCosting, onDelete }) {
                 <span className="mono-font" style={{ color: "#D1453B" }}>−{m.qty}{m.unit}</span>
               </div>
             ))}
+            {batch.containerUsed && (
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-zinc-600">
+                  {batch.containerUsed.itemName} (container)
+                  {canViewCosting && batch.containerUsed.unitCostUsed != null && (
+                    <span className="text-zinc-400"> (₹{batch.containerUsed.unitCostUsed.toFixed(2)}/unit)</span>
+                  )}
+                </span>
+                <span className="mono-font" style={{ color: "#D1453B" }}>−{batch.containerUsed.unitsUsed} unit{batch.containerUsed.unitsUsed !== 1 ? "s" : ""}</span>
+              </div>
+            )}
           </div>
 
           {canViewCosting && (
@@ -1236,7 +1293,7 @@ function ProductionCard({ batch, accent, isBoss, canViewCosting, onDelete }) {
           </div>
           {isBoss && (
             <button onClick={() => onDelete(batch.id)} className="mt-3 flex items-center gap-1.5 text-xs text-zinc-400">
-              <Trash2 size={12} /> Remove log entry (stock changes stay as-is)
+              <Trash2 size={12} /> Remove batch (reverses stock used &amp; produced)
             </button>
           )}
         </div>
@@ -2028,6 +2085,7 @@ function AuthenticatedApp() {
   const visible = filter === "All" ? combined : filter === "Low stock" ? lowStock : combined.filter((i) => i.category === filter);
   const rawMaterials = combined.filter((i) => i.category === "Raw material");
   const finishedGoods = combined.filter((i) => i.category === "Finished good");
+  const containers = combined.filter((i) => i.category === "Packaging" && i.capacityKg > 0);
   const visibleOrders = isHomecareOrdersOnly ? orders.filter((o) => o.by === session.name) : orders;
 
   const allHistory = useMemo(() => {
@@ -2100,9 +2158,35 @@ function AuthenticatedApp() {
       else nextSharedItems[idx] = updatedItem;
     }
 
+    let containerUsed = null;
+    if (batch.containerId) {
+      const inBrandIdx = nextItems.findIndex((i) => i.id === batch.containerId);
+      const inSharedIdx = nextSharedItems.findIndex((i) => i.id === batch.containerId);
+      const list = inBrandIdx >= 0 ? nextItems : inSharedIdx >= 0 ? nextSharedItems : null;
+      const idx = inBrandIdx >= 0 ? inBrandIdx : inSharedIdx;
+      if (list && idx >= 0) {
+        const original = list[idx];
+        const capacityKg = original.capacityKg || 1;
+        const unitsUsed = Math.ceil(batch.outputQty / capacityKg);
+        const { cost, newQty, newLots, unitCostUsed } = consumeMaterial(original, unitsUsed);
+        containerUsed = { itemId: original.id, itemName: original.name, unitsUsed, capacityKg, unitCostUsed, cost };
+
+        const updatedContainer = {
+          ...original,
+          qty: newQty,
+          lots: newLots,
+          history: [
+            { id: uid(), type: "out", qty: unitsUsed, date: new Date().toISOString(), note: `Used as container for batch ${batch.batchNumber} (${batch.productName})`, priceNote: unitCostUsed ? `₹${unitCostUsed.toFixed(2)}/unit` : null, by: batch.by },
+            ...original.history,
+          ],
+        };
+        if (inBrandIdx >= 0) nextItems[idx] = updatedContainer;
+        else nextSharedItems[idx] = updatedContainer;
+      }
+    }
+
     const laborCost = materialCost * LABOR_RATE;
-    const canRate = batch.canUsed === "old" ? CAN_RATES.old : batch.canUsed === "new" ? CAN_RATES.new : 0;
-    const canCost = batch.outputQty * canRate;
+    const canCost = containerUsed ? containerUsed.cost : 0;
     const totalCost = materialCost + laborCost + canCost;
     const costPerKg = batch.outputQty > 0 ? totalCost / batch.outputQty : 0;
     const gstAmount = totalCost * GST_RATE;
@@ -2111,6 +2195,7 @@ function AuthenticatedApp() {
     const finalBatch = {
       ...batch,
       materials: finalMaterials,
+      containerUsed,
       costing: { materialCost, laborCost, canCost, totalCost, costPerKg, gstAmount, costPerKgWithGst },
     };
 
@@ -2156,6 +2241,55 @@ function AuthenticatedApp() {
 
   const deleteBatch = (id) => {
     if (!isBoss) return;
+    const batch = batches.find((b) => b.id === id);
+    if (!batch) return;
+    if (!window.confirm(`Remove batch ${batch.batchNumber} and reverse the stock it used/produced?`)) return;
+
+    let nextItems = [...items];
+    let nextSharedItems = [...sharedItems];
+
+    const restoreConsumed = (itemId, qty, unitCostUsed) => {
+      const inBrandIdx = nextItems.findIndex((i) => i.id === itemId);
+      const inSharedIdx = nextSharedItems.findIndex((i) => i.id === itemId);
+      const list = inBrandIdx >= 0 ? nextItems : inSharedIdx >= 0 ? nextSharedItems : null;
+      const idx = inBrandIdx >= 0 ? inBrandIdx : inSharedIdx;
+      if (!list || idx < 0) return;
+
+      const original = list[idx];
+      const { qty: newQty, lots: newLots } = addStockInLot(original, qty, unitCostUsed || "");
+      const updated = {
+        ...original,
+        qty: newQty,
+        lots: newLots,
+        history: [
+          { id: uid(), type: "in", qty, date: new Date().toISOString(), note: `Reversed — batch ${batch.batchNumber} (${batch.productName}) deleted`, by: session.name },
+          ...original.history,
+        ],
+      };
+      if (inBrandIdx >= 0) nextItems[idx] = updated;
+      else nextSharedItems[idx] = updated;
+    };
+
+    (batch.materials || []).forEach((m) => restoreConsumed(m.itemId, m.qty, m.unitCostUsed));
+    if (batch.containerUsed) restoreConsumed(batch.containerUsed.itemId, batch.containerUsed.unitsUsed, batch.containerUsed.unitCostUsed);
+
+    const fgIdx = nextItems.findIndex(
+      (i) => i.category === "Finished good" && i.name.trim().toLowerCase() === batch.productName.trim().toLowerCase()
+    );
+    if (fgIdx >= 0) {
+      const fg = nextItems[fgIdx];
+      nextItems[fgIdx] = {
+        ...fg,
+        qty: Math.max(0, fg.qty - batch.outputQty),
+        history: [
+          { id: uid(), type: "out", qty: batch.outputQty, date: new Date().toISOString(), note: `Reversed — batch ${batch.batchNumber} deleted`, by: session.name },
+          ...fg.history,
+        ],
+      };
+    }
+
+    save(nextItems);
+    saveShared(nextSharedItems);
     saveBatches(batches.filter((b) => b.id !== id));
   };
 
@@ -2386,6 +2520,7 @@ function AuthenticatedApp() {
                 accent={meta.accent}
                 name={session.name}
                 rawMaterials={rawMaterials}
+                containers={containers}
                 onClose={() => setShowProdForm(false)}
                 onSubmit={logProduction}
               />
