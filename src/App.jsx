@@ -7,6 +7,7 @@ import {
   Truck, Clock, ArrowDownCircle, ArrowUpCircle, RotateCcw, User, History as HistoryIcon,
   Shield, LogIn, Pencil, Factory, UploadCloud, Layers, ShoppingCart, LayoutDashboard, TrendingUp,
   FlaskConical, CheckCircle2, XCircle, Download, ClipboardList, ClipboardCheck, CalendarClock,
+  Inbox,
 } from "lucide-react";
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -39,6 +40,13 @@ const ORDER_STATUSES = {
   pending: { label: "Pending", color: "#D9A441" },
   in_production: { label: "In production", color: "#3E8E86" },
   completed: { label: "Completed", color: "#2E9E5B" },
+};
+
+const SAMPLE_STATUSES = {
+  received: { label: "Received", color: "#D9A441" },
+  testing: { label: "Testing", color: "#3E8E86" },
+  completed: { label: "Completed", color: "#2E9E5B" },
+  returned: { label: "Returned", color: "#6B7280" },
 };
 
 const USERS = [
@@ -423,6 +431,29 @@ function useLab(brand) {
   };
 
   return { tests, save };
+}
+
+function useSamples(brand) {
+  const [samples, setSamples] = useState([]);
+
+  useEffect(() => {
+    const ref = doc(db, "samples", brand);
+    const unsub = onSnapshot(ref, (snap) => {
+      setSamples(snap.exists() ? snap.data().samples || [] : []);
+    });
+    return () => unsub();
+  }, [brand]);
+
+  const save = async (next) => {
+    setSamples(next);
+    try {
+      await setDoc(doc(db, "samples", brand), { samples: sanitize(next) });
+    } catch (e) {
+      console.error("Failed to save sample log", e);
+    }
+  };
+
+  return { samples, save };
 }
 
 function useLoginLog() {
@@ -1800,6 +1831,167 @@ function LabCard({ test, accent, brandLabel, isBoss, onDelete }) {
   );
 }
 
+function SampleForm({ accent, name, onSubmit, onClose }) {
+  const [source, setSource] = useState("");
+  const [description, setDescription] = useState("");
+  const [qty, setQty] = useState("");
+  const [unit, setUnit] = useState("g");
+  const [dateReceived, setDateReceived] = useState(todayStr());
+  const [notes, setNotes] = useState("");
+
+  const submit = () => {
+    if (!source.trim() || !description.trim() || !qty) return;
+    const q = Number(qty);
+    onSubmit({
+      id: uid(),
+      source: source.trim(),
+      description: description.trim(),
+      qtyReceived: q,
+      qtyRemaining: q,
+      unit,
+      dateReceived,
+      notes: notes.trim(),
+      status: "received",
+      history: [],
+      by: name,
+      createdAt: new Date().toISOString(),
+    });
+    onClose();
+  };
+
+  return (
+    <div className="rounded-xl p-4 mb-3" style={{ background: "#F3F5F4", border: "1px solid #00000012" }}>
+      <div className="flex justify-between items-center mb-3">
+        <span className="text-sm font-semibold tracking-wide" style={{ color: accent }}>NEW SAMPLE RECEIVED</span>
+        <button onClick={onClose} aria-label="Close form"><X size={16} className="text-zinc-400" /></button>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div className="col-span-2"><input placeholder="Received from (customer / supplier)" value={source} onChange={(e) => setSource(e.target.value)} className={inputCls} /></div>
+        <div className="col-span-2"><input placeholder="Sample description (e.g. Antitack they're currently using)" value={description} onChange={(e) => setDescription(e.target.value)} className={inputCls} /></div>
+        <input placeholder="Qty received" type="number" value={qty} onChange={(e) => setQty(e.target.value)} className={inputCls} />
+        <select value={unit} onChange={(e) => setUnit(e.target.value)} className={inputCls}>
+          {UNITS.map((u) => <option key={u}>{u}</option>)}
+        </select>
+        <div className="col-span-2"><input type="date" value={dateReceived} onChange={(e) => setDateReceived(e.target.value)} className={inputCls} /></div>
+        <div className="col-span-2"><textarea placeholder="Notes (optional)" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className={inputCls + " resize-none"} /></div>
+      </div>
+      <button onClick={submit} className="mt-3 w-full rounded-lg py-2 text-sm font-semibold" style={{ background: accent, color: "#ffffff" }}>
+        Log sample
+      </button>
+    </div>
+  );
+}
+
+function SampleCard({ sample, accent, isBoss, onUpdateStatus, onLogUsage, onDelete }) {
+  const [open, setOpen] = useState(false);
+  const [useQty, setUseQty] = useState("");
+  const [useNote, setUseNote] = useState("");
+  const status = SAMPLE_STATUSES[sample.status] || SAMPLE_STATUSES.received;
+  const remaining = sample.qtyRemaining != null ? sample.qtyRemaining : sample.qtyReceived;
+
+  const logUsage = () => {
+    const q = Number(useQty);
+    if (!q || q <= 0) return;
+    onLogUsage(sample.id, Math.min(q, remaining), useNote.trim());
+    setUseQty("");
+    setUseNote("");
+  };
+
+  return (
+    <div className="rounded-xl overflow-hidden" style={{ background: "#FFFFFF", border: "1px solid #00000014" }}>
+      <button className="w-full px-3.5 py-3 flex items-center gap-3 text-left" onClick={() => setOpen(!open)}>
+        <Inbox size={18} style={{ color: accent }} className="shrink-0" />
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium text-zinc-900 truncate">{sample.source}</div>
+          <div className="text-xs text-zinc-500 mt-0.5 truncate">
+            {sample.description} · {sample.dateReceived}
+          </div>
+        </div>
+        <span className="mono-font text-xs shrink-0 text-zinc-700">{remaining}/{sample.qtyReceived}{sample.unit}</span>
+        <span
+          className="text-[10px] font-semibold px-2 py-1 rounded-full shrink-0"
+          style={{ background: `${status.color}18`, color: status.color }}
+        >
+          {status.label}
+        </span>
+        {open ? <ChevronUp size={16} className="text-zinc-400" /> : <ChevronDown size={16} className="text-zinc-400" />}
+      </button>
+      {open && (
+        <div className="px-3.5 pb-3.5" style={{ borderTop: "1px solid #00000010" }}>
+          {sample.notes && (
+            <div className="mt-3 rounded-lg px-3 py-2 text-xs text-zinc-600" style={{ background: "#F7F8F7" }}>
+              {sample.notes}
+            </div>
+          )}
+
+          <div className="mt-3 text-[10px] uppercase tracking-wide text-zinc-400 mb-1">
+            Remaining: {remaining}{sample.unit} of {sample.qtyReceived}{sample.unit} received
+          </div>
+          {remaining > 0 && (
+            <div className="flex gap-2 mt-1">
+              <input
+                placeholder={`Qty used, ${sample.unit}`}
+                type="number"
+                value={useQty}
+                onChange={(e) => setUseQty(e.target.value)}
+                className={inputCls}
+                style={{ maxWidth: "7rem" }}
+              />
+              <input
+                placeholder="For (e.g. test #123)"
+                value={useNote}
+                onChange={(e) => setUseNote(e.target.value)}
+                className={inputCls + " flex-1"}
+              />
+              <button onClick={logUsage} className="px-3 rounded-lg text-xs font-semibold shrink-0" style={{ background: accent, color: "#ffffff" }}>
+                Log use
+              </button>
+            </div>
+          )}
+
+          {sample.history && sample.history.length > 0 && (
+            <div className="mt-3">
+              <div className="text-[10px] uppercase tracking-wide text-zinc-400 mb-1">Usage history</div>
+              {sample.history.map((h) => (
+                <div key={h.id} className="flex items-center justify-between text-xs py-1">
+                  <span className="text-zinc-600 truncate">{h.note || "Used"}</span>
+                  <span className="mono-font shrink-0 ml-2" style={{ color: "#D1453B" }}>−{h.qty}{sample.unit}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="text-[10px] text-zinc-400 flex items-center gap-1 mt-3">
+            <User size={9} /> Logged by {sample.by} · {fmtDate(sample.createdAt)}
+          </div>
+
+          <div className="flex gap-2 mt-3">
+            {Object.entries(SAMPLE_STATUSES).map(([key, s]) => (
+              <button
+                key={key}
+                onClick={() => onUpdateStatus(sample.id, key)}
+                className="flex-1 rounded-lg py-2 text-xs font-medium"
+                style={{
+                  background: sample.status === key ? `${s.color}2a` : `${s.color}15`,
+                  color: s.color,
+                }}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+
+          {isBoss && (
+            <button onClick={() => onDelete(sample.id)} className="mt-3 flex items-center gap-1.5 text-xs text-zinc-400">
+              <Trash2 size={12} /> Remove sample record
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Dashboard({ meta, items, batches, sales, canViewCosting }) {
   const lowStockItems = items.filter((i) => i.qty <= i.threshold);
   const rawCount = items.filter((i) => i.category === "Raw material").length;
@@ -2104,6 +2296,8 @@ function AuthenticatedApp() {
   const [showProdForm, setShowProdForm] = useState(false);
   const [showSalesForm, setShowSalesForm] = useState(false);
   const [showLabForm, setShowLabForm] = useState(false);
+  const [showSampleForm, setShowSampleForm] = useState(false);
+  const [labSubTab, setLabSubTab] = useState("tests");
   const [showOrderForm, setShowOrderForm] = useState(false);
   const [filter, setFilter] = useState("All");
   const { items, save, loading } = useInventory(brand);
@@ -2111,6 +2305,7 @@ function AuthenticatedApp() {
   const { batches, save: saveBatches } = useProduction(brand);
   const { sales, save: saveSales } = useSales(brand);
   const { tests, save: saveTests } = useLab(brand);
+  const { samples, save: saveSamples } = useSamples(brand);
   const { orders, save: saveOrders } = useOrders(brand);
   const { session, save: saveSession } = useSession();
   const { logins, record } = useLoginLog();
@@ -2417,6 +2612,29 @@ function AuthenticatedApp() {
     saveTests(tests.filter((t) => t.id !== id));
   };
 
+  const addSample = (sample) => saveSamples([sample, ...samples]);
+  const updateSampleStatus = (id, status) => saveSamples(samples.map((s) => (s.id === id ? { ...s, status } : s)));
+  const logSampleUsage = (id, qty, note) => {
+    saveSamples(
+      samples.map((s) => {
+        if (s.id !== id) return s;
+        const remaining = s.qtyRemaining != null ? s.qtyRemaining : s.qtyReceived;
+        return {
+          ...s,
+          qtyRemaining: Math.max(0, remaining - qty),
+          history: [
+            { id: uid(), qty, note, date: new Date().toISOString(), by: session.name },
+            ...(s.history || []),
+          ],
+        };
+      })
+    );
+  };
+  const deleteSample = (id) => {
+    if (!isBoss) return;
+    saveSamples(samples.filter((s) => s.id !== id));
+  };
+
   const addOrder = (order) => saveOrders([order, ...orders]);
   const updateOrderStatus = (id, status) => saveOrders(orders.map((o) => (o.id === id ? { ...o, status } : o)));
   const deleteOrder = (id) => {
@@ -2648,26 +2866,78 @@ function AuthenticatedApp() {
           </>
         ) : tab === "lab" ? (
           <>
-            {showLabForm && (
-              <LabForm
-                accent={meta.accent}
-                name={session.name}
-                onClose={() => setShowLabForm(false)}
-                onSubmit={addLabTest}
-              />
-            )}
-            {tests.length === 0 && !showLabForm && (
-              <div className="text-center py-14">
-                <FlaskConical size={28} className="mx-auto text-zinc-300 mb-2" />
-                <p className="text-sm text-zinc-500">No lab tests logged yet for {meta.label}.</p>
-                <p className="text-xs text-zinc-400 mt-1">Tap + to log your first test.</p>
-              </div>
-            )}
-            <div className="space-y-2">
-              {tests.map((test) => (
-                <LabCard key={test.id} test={test} accent={meta.accent} brandLabel={meta.label} isBoss={isBoss} onDelete={deleteLabTest} />
+            <div className="flex gap-1.5 mb-3">
+              {[{ key: "tests", label: "Tests" }, { key: "samples", label: "Samples" }].map((s) => (
+                <button
+                  key={s.key}
+                  onClick={() => setLabSubTab(s.key)}
+                  className="px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors"
+                  style={{
+                    background: labSubTab === s.key ? meta.accent : "transparent",
+                    color: labSubTab === s.key ? "#ffffff" : "#6B7280",
+                    border: labSubTab === s.key ? "none" : "1px solid #00000014",
+                  }}
+                >
+                  {s.label}
+                </button>
               ))}
             </div>
+
+            {labSubTab === "tests" ? (
+              <>
+                {showLabForm && (
+                  <LabForm
+                    accent={meta.accent}
+                    name={session.name}
+                    onClose={() => setShowLabForm(false)}
+                    onSubmit={addLabTest}
+                  />
+                )}
+                {tests.length === 0 && !showLabForm && (
+                  <div className="text-center py-14">
+                    <FlaskConical size={28} className="mx-auto text-zinc-300 mb-2" />
+                    <p className="text-sm text-zinc-500">No lab tests logged yet for {meta.label}.</p>
+                    <p className="text-xs text-zinc-400 mt-1">Tap + to log your first test.</p>
+                  </div>
+                )}
+                <div className="space-y-2">
+                  {tests.map((test) => (
+                    <LabCard key={test.id} test={test} accent={meta.accent} brandLabel={meta.label} isBoss={isBoss} onDelete={deleteLabTest} />
+                  ))}
+                </div>
+              </>
+            ) : (
+              <>
+                {showSampleForm && (
+                  <SampleForm
+                    accent={meta.accent}
+                    name={session.name}
+                    onClose={() => setShowSampleForm(false)}
+                    onSubmit={addSample}
+                  />
+                )}
+                {samples.length === 0 && !showSampleForm && (
+                  <div className="text-center py-14">
+                    <Inbox size={28} className="mx-auto text-zinc-300 mb-2" />
+                    <p className="text-sm text-zinc-500">No incoming samples logged yet for {meta.label}.</p>
+                    <p className="text-xs text-zinc-400 mt-1">Tap + to log a sample you've received.</p>
+                  </div>
+                )}
+                <div className="space-y-2">
+                  {samples.map((sample) => (
+                    <SampleCard
+                      key={sample.id}
+                      sample={sample}
+                      accent={meta.accent}
+                      isBoss={isBoss}
+                      onUpdateStatus={updateSampleStatus}
+                      onLogUsage={logSampleUsage}
+                      onDelete={deleteSample}
+                    />
+                  ))}
+                </div>
+              </>
+            )}
           </>
         ) : tab === "history" ? (
           <div className="rounded-xl px-3.5 py-2" style={{ background: "#FFFFFF", border: "1px solid #00000014" }}>
@@ -2754,10 +3024,10 @@ function AuthenticatedApp() {
 
       {tab === "lab" && (
         <button
-          onClick={() => setShowLabForm(true)}
+          onClick={() => (labSubTab === "tests" ? setShowLabForm(true) : setShowSampleForm(true))}
           className="fixed bottom-6 right-6 w-12 h-12 rounded-full flex items-center justify-center shadow-lg"
           style={{ background: meta.accent }}
-          aria-label="Log new lab test"
+          aria-label={labSubTab === "tests" ? "Log new lab test" : "Log new sample"}
         >
           <Plus size={22} color="#ffffff" strokeWidth={2.5} />
         </button>
