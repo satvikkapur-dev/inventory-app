@@ -35,7 +35,8 @@ const CATEGORIES = ["Raw material", "Packaging", "Finished good"];
 const UNITS = ["g", "kg", "ml", "L", "units", "drums", "cartons"];
 const LABOR_RATE = 0.15;
 const GST_RATE = 0.18;
-const SECRETARY_WEBHOOK_URL = import.meta.env.VITE_SECRETARY_WEBHOOK_URL || "";
+const SECRETARY_WEBHOOK_URL =
+  import.meta.env.VITE_SECRETARY_WEBHOOK_URL || "https://hook.eu1.make.com/m9bnpoy9pomx5l87uv2g8kkgkze78858";
 
 const ORDER_STATUSES = {
   pending: { label: "Pending", color: "#D9A441" },

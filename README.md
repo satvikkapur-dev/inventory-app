@@ -53,24 +53,15 @@ questions about stock/orders/samples, tell it to log something, or ask it to rem
 something later — it replies via a Make.com automation and can ping you on Telegram for
 proactive alerts (low stock, overdue orders, due reminders).
 
-The Make.com scenario ("AI Secretary Backend") is already built and active. Webhook URL:
+The Make.com scenario ("AI Secretary Backend") is already built, active, and wired directly
+into the app and into the scheduled checker (`.github/workflows/ai-secretary-tick.yml`,
+which pings it every 6 hours to check for low stock, overdue orders, and due reminders —
+tuned to stay within Make's free-plan usage limits). Nothing to configure in Vercel or
+GitHub — it just works once this is deployed.
 
-```
-https://hook.eu1.make.com/m9bnpoy9pomx5l87uv2g8kkgkze78858
-```
+The only remaining step is connecting Telegram so it can actually message you:
 
-To turn it on:
-
-1. **Point the app at the Make webhook.** In Vercel, go to your project → Settings →
-   Environment Variables, add `VITE_SECRETARY_WEBHOOK_URL` set to the URL above, then
-   redeploy. (For local dev, put the same value in a `.env.local` file at the project root.)
-2. **Enable the proactive checker.** In this repo, go to Settings → Secrets and variables →
-   Actions, and add a secret named `AI_SECRETARY_WEBHOOK_URL` with the same URL. A scheduled
-   workflow (`.github/workflows/ai-secretary-tick.yml`) pings it every 6 hours so it can
-   check for low stock, overdue orders, and due reminders — that interval is tuned to stay
-   within Make's free-plan usage limits (1000 operations/month); shorten it in the workflow
-   file if you upgrade your Make plan.
-3. **Connect Telegram for notifications.**
+1. **Connect Telegram for notifications.**
    - Create a bot via [@BotFather](https://t.me/BotFather) on Telegram and copy its token.
    - Open this Make authorization link and paste the token in:
      `https://eu1.make.com/2236317/credentials-requests/inbox?requestId=6f659601-8365-42ac-b228-9d47e3970b53`
