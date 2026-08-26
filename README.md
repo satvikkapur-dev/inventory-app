@@ -53,21 +53,37 @@ questions about stock/orders/samples, tell it to log something, or ask it to rem
 something later — it replies via a Make.com automation and can ping you on Telegram for
 proactive alerts (low stock, overdue orders, due reminders).
 
+The Make.com scenario ("AI Secretary Backend") is already built and active. Webhook URL:
+
+```
+https://hook.eu1.make.com/m9bnpoy9pomx5l87uv2g8kkgkze78858
+```
+
 To turn it on:
 
 1. **Point the app at the Make webhook.** In Vercel, go to your project → Settings →
-   Environment Variables, and add `VITE_SECRETARY_WEBHOOK_URL` set to the webhook URL from
-   the Make scenario, then redeploy. (For local dev, put the same value in a `.env.local`
-   file at the project root.)
+   Environment Variables, add `VITE_SECRETARY_WEBHOOK_URL` set to the URL above, then
+   redeploy. (For local dev, put the same value in a `.env.local` file at the project root.)
 2. **Enable the proactive checker.** In this repo, go to Settings → Secrets and variables →
-   Actions, and add a secret named `AI_SECRETARY_WEBHOOK_URL` with the same webhook URL. A
-   scheduled workflow (`.github/workflows/ai-secretary-tick.yml`) pings it every 6 hours so
-   it can check for low stock, overdue orders, and due reminders — that interval is tuned to
-   stay within Make's free-plan usage limits; you can shorten it in the workflow file if you
-   upgrade your Make plan.
-3. **Authorize the connections Make needs** (Telegram bot for notifications, and anything
-   else the scenario asks for) — you'll get a one-time authorization link for each from
-   Make when the scenario is set up.
+   Actions, and add a secret named `AI_SECRETARY_WEBHOOK_URL` with the same URL. A scheduled
+   workflow (`.github/workflows/ai-secretary-tick.yml`) pings it every 6 hours so it can
+   check for low stock, overdue orders, and due reminders — that interval is tuned to stay
+   within Make's free-plan usage limits (1000 operations/month); shorten it in the workflow
+   file if you upgrade your Make plan.
+3. **Connect Telegram for notifications.**
+   - Create a bot via [@BotFather](https://t.me/BotFather) on Telegram and copy its token.
+   - Open this Make authorization link and paste the token in:
+     `https://eu1.make.com/2236317/credentials-requests/inbox?requestId=6f659601-8365-42ac-b228-9d47e3970b53`
+   - Send `/start` to your new bot once, then get your numeric chat ID (message
+     [@userinfobot](https://t.me/userinfobot), or open
+     `https://api.telegram.org/bot<your-token>/getUpdates` in a browser after messaging the bot).
+   - Tell Claude the connection is authorized and your chat ID — the last step (wiring the
+     actual "send Telegram message" action into the scenario) is a single quick follow-up.
+
+**Current limitation:** natural-language data entry (e.g. "log 5kg used from X") is not
+wired up to actually save yet — the secretary understands the request and will tell you so,
+but you still need to log it in the app for now. Everything else (answering questions,
+reminders, and — once Telegram is connected — proactive low-stock/overdue alerts) is live.
 
 If the webhook isn't configured, the chat button still shows but replies that it isn't
 connected yet.
