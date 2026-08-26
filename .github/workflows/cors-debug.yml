@@ -6,17 +6,9 @@ jobs:
   debug:
     runs-on: ubuntu-latest
     steps:
-      - name: OPTIONS preflight check
+      - name: POST tick
         run: |
-          echo "=== OPTIONS preflight ==="
-          curl -sS -i -X OPTIONS "https://hook.eu1.make.com/m9bnpoy9pomx5l87uv2g8kkgkze78858" \
-            -H "Origin: https://inventory-app.vercel.app" \
-            -H "Access-Control-Request-Method: POST" \
-            -H "Access-Control-Request-Headers: content-type"
-      - name: POST with Origin header
-        run: |
-          echo "=== POST with Origin ==="
+          echo "=== POST tick ==="
           curl -sS -i -X POST "https://hook.eu1.make.com/m9bnpoy9pomx5l87uv2g8kkgkze78858" \
-            -H "Origin: https://inventory-app.vercel.app" \
             -H "Content-Type: application/json" \
-            -d '{"kind":"chat","user":"Debug","text":"ping"}'
+            -d '{"kind":"tick"}'
