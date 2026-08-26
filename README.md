@@ -45,3 +45,29 @@ up on your phone right away, and vice versa.
 ## If you get stuck
 Any of these steps can be pasted into Claude ("I'm on Step 2 and GitHub is asking me X") and
 I can walk you through it directly.
+
+## AI Secretary (optional)
+
+There's an "AI Secretary" chat button (bottom-left, robot icon) built into the app. Ask it
+questions about stock/orders/samples, tell it to log something, or ask it to remind you of
+something later — it replies via a Make.com automation and can ping you on Telegram for
+proactive alerts (low stock, overdue orders, due reminders).
+
+To turn it on:
+
+1. **Point the app at the Make webhook.** In Vercel, go to your project → Settings →
+   Environment Variables, and add `VITE_SECRETARY_WEBHOOK_URL` set to the webhook URL from
+   the Make scenario, then redeploy. (For local dev, put the same value in a `.env.local`
+   file at the project root.)
+2. **Enable the proactive checker.** In this repo, go to Settings → Secrets and variables →
+   Actions, and add a secret named `AI_SECRETARY_WEBHOOK_URL` with the same webhook URL. A
+   scheduled workflow (`.github/workflows/ai-secretary-tick.yml`) pings it every 6 hours so
+   it can check for low stock, overdue orders, and due reminders — that interval is tuned to
+   stay within Make's free-plan usage limits; you can shorten it in the workflow file if you
+   upgrade your Make plan.
+3. **Authorize the connections Make needs** (Telegram bot for notifications, and anything
+   else the scenario asks for) — you'll get a one-time authorization link for each from
+   Make when the scenario is set up.
+
+If the webhook isn't configured, the chat button still shows but replies that it isn't
+connected yet.

@@ -7,7 +7,7 @@ import {
   Truck, Clock, ArrowDownCircle, ArrowUpCircle, RotateCcw, User, History as HistoryIcon,
   Shield, LogIn, Pencil, Factory, UploadCloud, Layers, ShoppingCart, LayoutDashboard, TrendingUp,
   FlaskConical, CheckCircle2, XCircle, Download, ClipboardList, ClipboardCheck, CalendarClock,
-  Inbox,
+  Inbox, MessageCircle, Send, Bot,
 } from "lucide-react";
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -35,6 +35,7 @@ const CATEGORIES = ["Raw material", "Packaging", "Finished good"];
 const UNITS = ["g", "kg", "ml", "L", "units", "drums", "cartons"];
 const LABOR_RATE = 0.15;
 const GST_RATE = 0.18;
+const SECRETARY_WEBHOOK_URL = import.meta.env.VITE_SECRETARY_WEBHOOK_URL || "";
 
 const ORDER_STATUSES = {
   pending: { label: "Pending", color: "#D9A441" },
@@ -2266,6 +2267,104 @@ function ProductionPlanning({ accent, orders, items, isBoss, onUpdateStatus, onD
   );
 }
 
+function SecretaryWidget({ name, accent }) {
+  const [open, setOpen] = useState(false);
+  const [messages, setMessages] = useState([
+    { role: "assistant", text: "Hi, I'm your AI secretary. Ask me about stock, orders or samples, tell me to log something, or ask me to remind you of something later." },
+  ]);
+  const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
+
+  const send = async () => {
+    const msg = text.trim();
+    if (!msg || sending) return;
+    if (!SECRETARY_WEBHOOK_URL) {
+      setError("The AI secretary isn't connected yet — ask the admin to set VITE_SECRETARY_WEBHOOK_URL.");
+      return;
+    }
+    setMessages((m) => [...m, { role: "user", text: msg }]);
+    setText("");
+    setSending(true);
+    setError("");
+    try {
+      const res = await fetch(SECRETARY_WEBHOOK_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "chat", user: name, text: msg }),
+      });
+      if (!res.ok) throw new Error("bad status");
+      const data = await res.json();
+      setMessages((m) => [...m, { role: "assistant", text: data.reply || "Done." }]);
+    } catch {
+      setMessages((m) => [...m, { role: "assistant", text: "Sorry, I couldn't reach the secretary. Try again in a moment." }]);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="fixed bottom-6 left-6 w-12 h-12 rounded-full flex items-center justify-center shadow-lg z-40"
+        style={{ background: accent }}
+        aria-label="AI secretary"
+      >
+        {open ? <X size={20} color="#ffffff" strokeWidth={2.5} /> : <Bot size={22} color="#ffffff" strokeWidth={2.5} />}
+      </button>
+
+      {open && (
+        <div
+          className="fixed bottom-24 left-4 right-4 sm:left-6 sm:right-auto sm:w-96 rounded-2xl shadow-xl flex flex-col z-40"
+          style={{ background: "#ffffff", border: "1px solid #00000014", height: "60vh", maxHeight: 480 }}
+        >
+          <div className="flex items-center gap-2 px-4 py-3" style={{ borderBottom: "1px solid #00000010" }}>
+            <Bot size={16} style={{ color: accent }} />
+            <span className="text-sm font-semibold text-zinc-900">AI Secretary</span>
+          </div>
+
+          <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2.5">
+            {messages.map((m, i) => (
+              <div key={i} className={"flex " + (m.role === "user" ? "justify-end" : "justify-start")}>
+                <div
+                  className="rounded-xl px-3 py-2 text-xs max-w-[85%] whitespace-pre-wrap"
+                  style={m.role === "user" ? { background: accent, color: "#ffffff" } : { background: "#F7F8F7", color: "#27272a" }}
+                >
+                  {m.text}
+                </div>
+              </div>
+            ))}
+            {sending && <div className="text-[11px] text-zinc-400 px-1">Thinking…</div>}
+            {error && <div className="text-[11px] px-1" style={{ color: "#E2574C" }}>{error}</div>}
+          </div>
+
+          <div className="flex items-center gap-2 px-3 py-3" style={{ borderTop: "1px solid #00000010" }}>
+            <input
+              autoFocus
+              placeholder="Ask, log, or say 'remind me...'"
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && send()}
+              className={inputCls}
+              disabled={sending}
+            />
+            <button
+              onClick={send}
+              disabled={sending || !text.trim()}
+              className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 disabled:opacity-40"
+              style={{ background: accent }}
+              aria-label="Send"
+            >
+              <Send size={15} color="#ffffff" />
+            </button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 export default function App() {
   const { ready: authReady, error: authError } = useAnonAuth();
 
@@ -3032,6 +3131,8 @@ function AuthenticatedApp() {
           <Plus size={22} color="#ffffff" strokeWidth={2.5} />
         </button>
       )}
+
+      <SecretaryWidget name={session.name} accent={meta.accent} />
     </div>
   );
 }
