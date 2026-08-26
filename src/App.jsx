@@ -2308,7 +2308,7 @@ function SecretaryWidget({ name, accent }) {
     <>
       <button
         onClick={() => setOpen((o) => !o)}
-        className="fixed bottom-6 left-6 w-12 h-12 rounded-full flex items-center justify-center shadow-lg z-40"
+        className="fixed bottom-24 right-6 w-12 h-12 rounded-full flex items-center justify-center shadow-lg z-40"
         style={{ background: accent }}
         aria-label="AI secretary"
       >
@@ -2317,7 +2317,7 @@ function SecretaryWidget({ name, accent }) {
 
       {open && (
         <div
-          className="fixed bottom-24 left-4 right-4 sm:left-6 sm:right-auto sm:w-96 rounded-2xl shadow-xl flex flex-col z-40"
+          className="fixed bottom-40 left-4 right-4 sm:left-auto sm:right-6 sm:w-96 rounded-2xl shadow-xl flex flex-col z-40"
           style={{ background: "#ffffff", border: "1px solid #00000014", height: "60vh", maxHeight: 480 }}
         >
           <div className="flex items-center gap-2 px-4 py-3" style={{ borderBottom: "1px solid #00000010" }}>
