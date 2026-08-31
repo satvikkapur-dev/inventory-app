@@ -56,7 +56,7 @@ const USERS = [
   { name: "SCPL", pin: "8941", role: "staff", canViewCosting: true },
   { name: "Vijay", pin: "2314", role: "staff", canViewCosting: false },
   { name: "Jyoti", pin: "3214", role: "staff", canViewCosting: false },
-  { name: "Ajay", pin: "4512", role: "staff", canViewCosting: false },
+  { name: "Ajay", pin: "4512", role: "staff", canViewCosting: false, canEnterPrice: true },
   { name: "Mohit", pin: "4213", role: "lab", canViewCosting: false },
   { name: "Kishore", pin: "9876", role: "homecare_orders", canViewCosting: false },
 ];
@@ -591,7 +591,7 @@ function PinGate({ onLogin }) {
   );
 }
 
-function ItemForm({ accent, name, canViewCosting, onAdd, onClose }) {
+function ItemForm({ accent, name, canEnterPrice, onAdd, onClose }) {
   const [nm, setNm] = useState("");
   const [category, setCategory] = useState("Raw material");
   const [qty, setQty] = useState("");
@@ -652,7 +652,7 @@ function ItemForm({ accent, name, canViewCosting, onAdd, onClose }) {
         </select>
         <div className="col-span-2"><input placeholder="Reorder below" type="number" value={threshold} onChange={(e) => setThreshold(e.target.value)} className={inputCls} /></div>
 
-        {canViewCosting && (
+        {canEnterPrice && (
           <div className="col-span-2">
             <input placeholder="Price for this stock (₹ per unit)" type="number" value={costPerUnit} onChange={(e) => setCostPerUnit(e.target.value)} className={inputCls} />
             {category === "Raw material" && (
@@ -844,7 +844,7 @@ function MovementRow({ h, showItem, canViewCosting }) {
   );
 }
 
-function ItemCard({ item, accent, name, isBoss, canViewCosting, onUpdate, onDelete }) {
+function ItemCard({ item, accent, name, isBoss, canViewCosting, canEnterPrice, onUpdate, onDelete }) {
   const [open, setOpen] = useState(false);
   const [activeAction, setActiveAction] = useState(null);
   const [moveQty, setMoveQty] = useState("");
@@ -859,7 +859,7 @@ function ItemCard({ item, accent, name, isBoss, canViewCosting, onUpdate, onDele
     if (!q || q <= 0) return;
 
     if (type === "in") {
-      const { qty: newQty, lots: newLots } = addStockInLot(item, q, canViewCosting ? lotPrice : "");
+      const { qty: newQty, lots: newLots } = addStockInLot(item, q, canEnterPrice ? lotPrice : "");
       const priceNote = canViewCosting && lotPrice ? `₹${lotPrice}/${item.unit} (new lot)` : null;
       onUpdate({
         ...item,
@@ -991,7 +991,7 @@ function ItemCard({ item, accent, name, isBoss, canViewCosting, onUpdate, onDele
                   value={moveQty}
                   onChange={(e) => setMoveQty(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" && !(activeAction === "in" && canViewCosting && item.category === "Raw material")) {
+                    if (e.key === "Enter" && !(activeAction === "in" && canEnterPrice && item.category === "Raw material")) {
                       if (activeAction === "reorder") logReorder();
                       else move(activeAction);
                     }
@@ -1006,7 +1006,7 @@ function ItemCard({ item, accent, name, isBoss, canViewCosting, onUpdate, onDele
                   Confirm
                 </button>
               </div>
-              {activeAction === "in" && canViewCosting && item.category === "Raw material" && (
+              {activeAction === "in" && canEnterPrice && item.category === "Raw material" && (
                 <input
                   placeholder={`Price for this lot, ₹/${item.unit} (blank = adds to most recent lot)`}
                   type="number"
@@ -2414,6 +2414,7 @@ function AuthenticatedApp() {
 
   const isBoss = session?.role === "boss";
   const canViewCosting = !!session?.canViewCosting;
+  const canEnterPrice = canViewCosting || !!session?.canEnterPrice;
   const isLabOnly = session?.role === "lab";
   const isHomecareOrdersOnly = session?.role === "homecare_orders";
   const canSeeLabTab = canViewCosting || isLabOnly;
@@ -2428,7 +2429,7 @@ function AuthenticatedApp() {
   }, [session]);
 
   const handleLogin = (user) => {
-    saveSession({ name: user.name, role: user.role, canViewCosting: !!user.canViewCosting });
+    saveSession({ name: user.name, role: user.role, canViewCosting: !!user.canViewCosting, canEnterPrice: !!user.canEnterPrice });
     record(user.name, user.role);
   };
 
@@ -2858,7 +2859,7 @@ function AuthenticatedApp() {
                 onImport={bulkAddItems}
               />
             )}
-            {showForm && <ItemForm accent={meta.accent} name={session.name} canViewCosting={canViewCosting} onClose={() => setShowForm(false)} onAdd={addItem} />}
+            {showForm && <ItemForm accent={meta.accent} name={session.name} canEnterPrice={canEnterPrice} onClose={() => setShowForm(false)} onAdd={addItem} />}
             {visible.length === 0 && !showForm && (
               <div className="text-center py-14">
                 <Package size={28} className="mx-auto text-zinc-300 mb-2" />
@@ -2870,7 +2871,7 @@ function AuthenticatedApp() {
             )}
             <div className="space-y-2">
               {visible.map((item) => (
-                <ItemCard key={item.id} item={item} accent={meta.accent} name={session.name} isBoss={isBoss} canViewCosting={canViewCosting} onUpdate={updateItem} onDelete={deleteItem} />
+                <ItemCard key={item.id} item={item} accent={meta.accent} name={session.name} isBoss={isBoss} canViewCosting={canViewCosting} canEnterPrice={canEnterPrice} onUpdate={updateItem} onDelete={deleteItem} />
               ))}
             </div>
           </>
