@@ -54,6 +54,7 @@ const USERS = [
   { name: "SCPL", pin: "8941", role: "staff", canViewCosting: true },
   { name: "Vijay", pin: "2314", role: "staff", canViewCosting: false },
   { name: "Jyoti", pin: "3214", role: "staff", canViewCosting: false },
+  { name: "Ajay", pin: "4512", role: "staff", canViewCosting: false },
   { name: "Mohit", pin: "4213", role: "lab", canViewCosting: false },
   { name: "Kishore", pin: "9876", role: "homecare_orders", canViewCosting: false },
 ];
