@@ -7,7 +7,7 @@ import {
   Truck, Clock, ArrowDownCircle, ArrowUpCircle, RotateCcw, User, History as HistoryIcon,
   Shield, LogIn, Pencil, Factory, UploadCloud, Layers, ShoppingCart, LayoutDashboard, TrendingUp,
   FlaskConical, CheckCircle2, XCircle, Download, ClipboardList, ClipboardCheck, CalendarClock,
-  Inbox, MessageCircle, Send, Bot,
+  Inbox, MinusCircle, MessageCircle, Send, Bot,
 } from "lucide-react";
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -15,6 +15,7 @@ import {
 
 const DARK_GREEN = "#155830";
 const LIGHT_GREEN = "#59A249";
+const TEXTILE_AMBER = "#A8672A";
 
 const BRANDS = {
   urbnfettch: {
@@ -28,6 +29,12 @@ const BRANDS = {
     sub: "Handwash · Dishwash · Tile cleaner",
     accent: LIGHT_GREEN,
     accentDim: "#59A24922",
+  },
+  textiles: {
+    label: "Textiles",
+    sub: "Textile chemicals & auxiliaries",
+    accent: TEXTILE_AMBER,
+    accentDim: "#A8672A22",
   },
 };
 
@@ -88,15 +95,20 @@ function fmtDate(iso) {
 // tab so the user can "Print / Save as PDF" a professional-looking report.
 function buildLabReportHTML(test, brandLabel) {
   const rows = test.parameters
-    .map(
-      (p) => `
+    .map((p) => {
+      const spec = p.specMin != null || p.specMax != null
+        ? `${p.specMin != null ? p.specMin : "–"} – ${p.specMax != null ? p.specMax : "–"}${p.unit || ""}`
+        : "No spec set";
+      const statusClass = p.pass === true ? "pass" : p.pass === false ? "fail" : "neutral";
+      const statusLabel = p.pass === true ? "PASS" : p.pass === false ? "FAIL" : "—";
+      return `
         <tr>
           <td>${p.name}</td>
           <td class="num">${p.result}${p.unit || ""}</td>
-          <td class="num">${p.specMin != null ? p.specMin : "–"} – ${p.specMax != null ? p.specMax : "–"}${p.unit || ""}</td>
-          <td class="status ${p.pass ? "pass" : "fail"}">${p.pass ? "PASS" : "FAIL"}</td>
-        </tr>`
-    )
+          <td class="num">${spec}</td>
+          <td class="status ${statusClass}">${statusLabel}</td>
+        </tr>`;
+    })
     .join("");
 
   return `<!DOCTYPE html>
@@ -126,10 +138,12 @@ function buildLabReportHTML(test, brandLabel) {
   table.results td.status { font-weight: 700; letter-spacing: 0.5px; }
   table.results td.status.pass { color: #2E9E5B; }
   table.results td.status.fail { color: #D1453B; }
+  table.results td.status.neutral { color: #8A8F98; }
   .overall { font-family: Arial, sans-serif; text-align: center; margin: 36px 0; }
   .overall .badge { display: inline-block; padding: 10px 32px; border-radius: 4px; font-weight: 800; letter-spacing: 3px; font-size: 16px; }
   .overall .badge.pass { background: #2E9E5B15; color: #2E9E5B; border: 2px solid #2E9E5B; }
   .overall .badge.fail { background: #D1453B15; color: #D1453B; border: 2px solid #D1453B; }
+  .overall .badge.neutral { background: #8A8F9815; color: #8A8F98; border: 2px solid #8A8F98; }
   .footer { margin-top: 60px; font-family: Arial, sans-serif; font-size: 10px; color: #999; display: flex; justify-content: space-between; border-top: 1px solid #eee; padding-top: 14px; }
   .sig { margin-top: 50px; display: flex; justify-content: space-between; font-family: Arial, sans-serif; font-size: 11px; }
   .sig div { width: 45%; }
@@ -167,7 +181,7 @@ function buildLabReportHTML(test, brandLabel) {
   </table>
 
   <div class="overall">
-    <div class="badge ${test.overallPass ? "pass" : "fail"}">OVERALL RESULT: ${test.overallPass ? "PASS" : "FAIL"}</div>
+    <div class="badge ${test.overallPass === true ? "pass" : test.overallPass === false ? "fail" : "neutral"}">OVERALL RESULT: ${test.overallPass === true ? "PASS" : test.overallPass === false ? "FAIL" : "RESULTS LOGGED"}</div>
   </div>
 
   <div class="sig">
@@ -670,7 +684,7 @@ function ItemForm({ accent, name, canEnterPrice, onAdd, onClose }) {
 
         <label className="col-span-2 flex items-center gap-2 text-xs text-zinc-600 mt-1">
           <input type="checkbox" checked={shared} onChange={(e) => setShared(e.target.checked)} className="w-3.5 h-3.5" />
-          Shared material — same stock used by both Rubber Div and Homecare
+          Shared material — same stock used across all divisions
         </label>
 
         <div className="col-span-2 text-[10px] uppercase tracking-wide text-zinc-400 mb-1 mt-1">Supplier (optional)</div>
@@ -767,7 +781,7 @@ function EditItemForm({ accent, item, canViewCosting, onSave, onClose }) {
 
         <label className="col-span-2 flex items-center gap-2 text-xs text-zinc-600 mt-1">
           <input type="checkbox" checked={shared} onChange={(e) => setShared(e.target.checked)} className="w-3.5 h-3.5" />
-          Shared material — same stock used by both Rubber Div and Homecare
+          Shared material — same stock used across all divisions
         </label>
 
         <div className="col-span-2 text-[10px] uppercase tracking-wide text-zinc-400 mb-1 mt-1">Supplier (optional)</div>
@@ -1700,11 +1714,13 @@ function LabForm({ accent, name, onSubmit, onClose, hideClose }) {
         const result = Number(p.result);
         const min = p.specMin !== "" ? Number(p.specMin) : null;
         const max = p.specMax !== "" ? Number(p.specMax) : null;
-        const pass = (min === null || result >= min) && (max === null || result <= max);
+        const hasSpec = min !== null || max !== null;
+        const pass = hasSpec ? (min === null || result >= min) && (max === null || result <= max) : null;
         return { id: p.id, name: p.name.trim(), result, unit: p.unit.trim(), specMin: min, specMax: max, pass };
       });
     if (finalParams.length === 0) return;
-    const overallPass = finalParams.every((p) => p.pass);
+    const specced = finalParams.filter((p) => p.pass !== null);
+    const overallPass = specced.length === 0 ? null : specced.every((p) => p.pass);
 
     onSubmit({
       id: uid(),
@@ -1735,6 +1751,7 @@ function LabForm({ accent, name, onSubmit, onClose, hideClose }) {
 
       <div className="mt-3">
         <div className="text-[10px] uppercase tracking-wide text-zinc-400 mb-1.5">Test parameters</div>
+        <p className="text-[10px] text-zinc-400 mb-1.5">Spec min/max are optional — leave both blank to just log a result, with no pass/fail forced on it.</p>
         <div className="space-y-2">
           {params.map((p) => (
             <div key={p.id} className="rounded-lg p-2" style={{ background: "#FFFFFF", border: "1px solid #00000012" }}>
@@ -1775,8 +1792,11 @@ function LabCard({ test, accent, brandLabel, isBoss, onDelete }) {
     win.document.write(buildLabReportHTML(test, brandLabel));
     win.document.close();
   };
+  const overallColor = test.overallPass === true ? "#2E9E5B" : test.overallPass === false ? "#D1453B" : "#8A8F98";
+  const overallLabel = test.overallPass === true ? "PASS" : test.overallPass === false ? "FAIL" : "LOGGED";
+
   return (
-    <div className="rounded-xl overflow-hidden" style={{ background: "#FFFFFF", border: `1px solid ${test.overallPass ? "#00000014" : "#D1453B55"}` }}>
+    <div className="rounded-xl overflow-hidden" style={{ background: "#FFFFFF", border: `1px solid ${test.overallPass === false ? "#D1453B55" : "#00000014"}` }}>
       <button className="w-full px-3.5 py-3 flex items-center gap-3 text-left" onClick={() => setOpen(!open)}>
         <FlaskConical size={18} style={{ color: accent }} className="shrink-0" />
         <div className="min-w-0 flex-1">
@@ -1787,10 +1807,10 @@ function LabCard({ test, accent, brandLabel, isBoss, onDelete }) {
         </div>
         <span
           className="text-[10px] font-semibold px-2 py-1 rounded-full shrink-0 flex items-center gap-1"
-          style={{ background: test.overallPass ? "#2E9E5B18" : "#D1453B18", color: test.overallPass ? "#2E9E5B" : "#D1453B" }}
+          style={{ background: `${overallColor}18`, color: overallColor }}
         >
-          {test.overallPass ? <CheckCircle2 size={11} /> : <XCircle size={11} />}
-          {test.overallPass ? "PASS" : "FAIL"}
+          {test.overallPass === true ? <CheckCircle2 size={11} /> : test.overallPass === false ? <XCircle size={11} /> : <MinusCircle size={11} />}
+          {overallLabel}
         </span>
         {open ? <ChevronUp size={16} className="text-zinc-400" /> : <ChevronDown size={16} className="text-zinc-400" />}
       </button>
@@ -1798,22 +1818,27 @@ function LabCard({ test, accent, brandLabel, isBoss, onDelete }) {
         <div className="px-3.5 pb-3.5" style={{ borderTop: "1px solid #00000010" }}>
           <div className="mt-3 text-[10px] uppercase tracking-wide text-zinc-400 mb-1.5">Parameters</div>
           <div className="space-y-1.5">
-            {test.parameters.map((p) => (
-              <div key={p.id} className="flex items-center justify-between text-xs">
-                <div className="flex items-center gap-1.5">
-                  {p.pass ? <CheckCircle2 size={12} style={{ color: "#2E9E5B" }} /> : <XCircle size={12} style={{ color: "#D1453B" }} />}
-                  <span className="text-zinc-700">{p.name}</span>
+            {test.parameters.map((p) => {
+              const pColor = p.pass === true ? "#2E9E5B" : p.pass === false ? "#D1453B" : "#8A8F98";
+              return (
+                <div key={p.id} className="flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-1.5">
+                    {p.pass === true ? <CheckCircle2 size={12} style={{ color: pColor }} /> : p.pass === false ? <XCircle size={12} style={{ color: pColor }} /> : <MinusCircle size={12} style={{ color: pColor }} />}
+                    <span className="text-zinc-700">{p.name}</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="mono-font font-semibold" style={{ color: pColor }}>{p.result}{p.unit}</span>
+                    {(p.specMin != null || p.specMax != null) ? (
+                      <span className="text-zinc-400 ml-1">
+                        (spec {p.specMin != null ? p.specMin : "–"}–{p.specMax != null ? p.specMax : "–"})
+                      </span>
+                    ) : (
+                      <span className="text-zinc-400 ml-1">(no spec)</span>
+                    )}
+                  </div>
                 </div>
-                <div className="text-right">
-                  <span className="mono-font font-semibold" style={{ color: p.pass ? "#2E9E5B" : "#D1453B" }}>{p.result}{p.unit}</span>
-                  {(p.specMin != null || p.specMax != null) && (
-                    <span className="text-zinc-400 ml-1">
-                      (spec {p.specMin != null ? p.specMin : "–"}–{p.specMax != null ? p.specMax : "–"})
-                    </span>
-                  )}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
           <div className="text-[10px] text-zinc-400 flex items-center gap-1 mt-3">
             <User size={9} /> Logged by {test.by} · {fmtDate(test.createdAt)}
