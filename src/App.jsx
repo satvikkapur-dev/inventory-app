@@ -2021,7 +2021,7 @@ function SampleCard({ sample, accent, isBoss, onUpdateStatus, onLogUsage, onDele
 }
 
 function Dashboard({ meta, items, batches, sales, canViewCosting }) {
-  const lowStockItems = items.filter((i) => i.qty <= i.threshold);
+  const lowStockItems = items.filter((i) => i.qty <= i.threshold && !(i.category === "Finished good" && i.qty <= 0));
   const rawCount = items.filter((i) => i.category === "Raw material").length;
   const packCount = items.filter((i) => i.category === "Packaging").length;
   const fgCount = items.filter((i) => i.category === "Finished good").length;
@@ -2460,11 +2460,11 @@ function AuthenticatedApp() {
 
   const combined = [...items, ...sharedItems];
 
-  const lowStock = combined.filter((i) => i.qty <= i.threshold);
-  // Sold-out finished goods clutter the main list once they hit 0 — hide them
-  // there, but they're still reachable via "Low stock" (finished goods default
-  // to a 0 reorder threshold, so 0 stock always qualifies).
+  // Sold-out finished goods shouldn't show up anywhere in Items once they
+  // hit 0 — they're just sold, not something needing action like a raw
+  // material running low.
   const isSoldOutFG = (i) => i.category === "Finished good" && i.qty <= 0;
+  const lowStock = combined.filter((i) => i.qty <= i.threshold && !isSoldOutFG(i));
   const visible = filter === "All"
     ? combined.filter((i) => !isSoldOutFG(i))
     : filter === "Low stock"
@@ -2903,11 +2903,9 @@ function AuthenticatedApp() {
                     ? "All finished goods are sold out right now."
                     : "Nothing matches this filter."}
                 </p>
-                {combined.length === 0 ? (
+                {combined.length === 0 && (
                   <p className="text-xs text-zinc-400 mt-1">Tap + to add your first item.</p>
-                ) : (filter === "All" || filter === "Finished good") && combined.some(isSoldOutFG) ? (
-                  <p className="text-xs text-zinc-400 mt-1">Check the "Low stock" filter to see them.</p>
-                ) : null}
+                )}
               </div>
             )}
             <div className="space-y-2">
