@@ -2461,7 +2461,15 @@ function AuthenticatedApp() {
   const combined = [...items, ...sharedItems];
 
   const lowStock = combined.filter((i) => i.qty <= i.threshold);
-  const visible = filter === "All" ? combined : filter === "Low stock" ? lowStock : combined.filter((i) => i.category === filter);
+  // Sold-out finished goods clutter the main list once they hit 0 — hide them
+  // there, but they're still reachable via "Low stock" (finished goods default
+  // to a 0 reorder threshold, so 0 stock always qualifies).
+  const isSoldOutFG = (i) => i.category === "Finished good" && i.qty <= 0;
+  const visible = filter === "All"
+    ? combined.filter((i) => !isSoldOutFG(i))
+    : filter === "Low stock"
+    ? lowStock
+    : combined.filter((i) => i.category === filter && !isSoldOutFG(i));
   const rawMaterials = combined.filter((i) => i.category === "Raw material");
   const finishedGoods = combined.filter((i) => i.category === "Finished good");
   const containers = combined.filter((i) => i.category === "Packaging" && i.capacityKg > 0);
@@ -2889,9 +2897,17 @@ function AuthenticatedApp() {
               <div className="text-center py-14">
                 <Package size={28} className="mx-auto text-zinc-300 mb-2" />
                 <p className="text-sm text-zinc-500">
-                  {combined.length === 0 ? `No inventory tracked for ${meta.label} yet.` : "Nothing matches this filter."}
+                  {combined.length === 0
+                    ? `No inventory tracked for ${meta.label} yet.`
+                    : (filter === "All" || filter === "Finished good") && combined.some(isSoldOutFG)
+                    ? "All finished goods are sold out right now."
+                    : "Nothing matches this filter."}
                 </p>
-                {combined.length === 0 && <p className="text-xs text-zinc-400 mt-1">Tap + to add your first item.</p>}
+                {combined.length === 0 ? (
+                  <p className="text-xs text-zinc-400 mt-1">Tap + to add your first item.</p>
+                ) : (filter === "All" || filter === "Finished good") && combined.some(isSoldOutFG) ? (
+                  <p className="text-xs text-zinc-400 mt-1">Check the "Low stock" filter to see them.</p>
+                ) : null}
               </div>
             )}
             <div className="space-y-2">
