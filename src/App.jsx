@@ -864,6 +864,8 @@ function ItemCard({ item, accent, name, isBoss, canViewCosting, canEnterPrice, o
   const [moveQty, setMoveQty] = useState("");
   const [lotPrice, setLotPrice] = useState("");
   const [editing, setEditing] = useState(false);
+  const [renamingName, setRenamingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState(item.name);
   const low = item.qty <= item.threshold;
   const pct = item.threshold > 0 ? Math.min(100, (item.qty / (item.threshold * 2)) * 100) : 100;
   const isRawWithLots = item.category === "Raw material" && item.lots && item.lots.length > 0;
@@ -921,6 +923,12 @@ function ItemCard({ item, accent, name, isBoss, canViewCosting, canEnterPrice, o
       setMoveQty("");
       setLotPrice("");
     }
+  };
+
+  const saveName = () => {
+    const trimmed = nameDraft.trim();
+    if (trimmed && trimmed !== item.name) onUpdate({ ...item, name: trimmed });
+    setRenamingName(false);
   };
 
   const avg = avgCostOf(item);
@@ -1042,6 +1050,31 @@ function ItemCard({ item, accent, name, isBoss, canViewCosting, canEnterPrice, o
               item.history.slice(0, 8).map((h) => <MovementRow key={h.id} h={h} canViewCosting={canViewCosting} />)
             )}
           </div>
+
+          {!renamingName ? (
+            <button
+              onClick={() => { setNameDraft(item.name); setRenamingName(true); }}
+              className="mt-3 flex items-center gap-1.5 text-xs text-zinc-500"
+            >
+              <Pencil size={12} /> Fix spelling
+            </button>
+          ) : (
+            <div className="mt-3 flex gap-2">
+              <input
+                autoFocus
+                value={nameDraft}
+                onChange={(e) => setNameDraft(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && saveName()}
+                className={inputCls}
+              />
+              <button onClick={saveName} className="px-3 rounded-lg text-xs font-semibold shrink-0" style={{ background: accent, color: "#ffffff" }}>
+                Save
+              </button>
+              <button onClick={() => setRenamingName(false)} className="px-3 rounded-lg text-xs font-medium shrink-0 text-zinc-500" style={{ background: "#00000008" }}>
+                Cancel
+              </button>
+            </div>
+          )}
 
           {isBoss && !editing && (
             <div className="mt-3 flex items-center gap-4">
