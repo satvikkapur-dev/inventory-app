@@ -197,6 +197,106 @@ function buildLabReportHTML(test, brandLabel) {
 </html>`;
 }
 
+// Builds a corporate-style printable inventory report for whatever item
+// list/filter is currently visible in the Items tab.
+function buildItemsReportHTML(items, brandLabel, filterLabel, canViewCosting) {
+  const lowCount = items.filter((i) => i.qty <= i.threshold).length;
+
+  const rows = items
+    .map((i) => {
+      const low = i.qty <= i.threshold;
+      const avg = canViewCosting ? avgCostOf(i) : 0;
+      return `
+        <tr>
+          <td>${i.name}</td>
+          <td>${i.category}</td>
+          <td class="num">${i.qty}${i.unit}</td>
+          <td class="num">${i.threshold}${i.unit}</td>
+          <td class="status ${low ? "fail" : "pass"}">${low ? "LOW STOCK" : "OK"}</td>
+          <td>${i.supplier?.name || "–"}</td>
+          ${canViewCosting ? `<td class="num">${avg > 0 ? `₹${avg.toFixed(2)}/${i.unit}` : "–"}</td>` : ""}
+        </tr>`;
+    })
+    .join("");
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Inventory Report — ${filterLabel}</title>
+<style>
+  @page { margin: 24mm 18mm; }
+  * { box-sizing: border-box; }
+  body { font-family: Georgia, 'Times New Roman', serif; color: #1a1a1a; margin: 0; padding: 40px; }
+  .wordmark { font-family: Arial, sans-serif; font-weight: 800; font-size: 22px; letter-spacing: 0.5px; }
+  .wordmark .a { color: #155830; }
+  .wordmark .b { color: #59A249; }
+  .tagline { font-family: Arial, sans-serif; font-size: 10px; color: #666; letter-spacing: 1px; margin-top: 2px; }
+  .doc-title { font-family: Arial, sans-serif; font-size: 15px; font-weight: 700; letter-spacing: 2px; text-align: center; margin: 36px 0 4px; text-transform: uppercase; color: #155830; }
+  .doc-sub { font-family: Arial, sans-serif; font-size: 11px; text-align: center; color: #888; margin-bottom: 32px; letter-spacing: 1px; }
+  .rule { border: none; border-top: 2px solid #155830; margin: 0 0 24px; }
+  .meta { width: 100%; border-collapse: collapse; margin-bottom: 28px; font-family: Arial, sans-serif; font-size: 12px; }
+  .meta td { padding: 6px 0; }
+  .meta td.label { color: #888; width: 140px; text-transform: uppercase; letter-spacing: 0.5px; font-size: 10px; }
+  .meta td.value { font-weight: 600; color: #1a1a1a; }
+  table.results { width: 100%; border-collapse: collapse; font-family: Arial, sans-serif; font-size: 12px; margin-bottom: 28px; }
+  table.results th { text-align: left; background: #F3F5F4; padding: 10px 12px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: #555; border-bottom: 2px solid #155830; }
+  table.results td { padding: 10px 12px; border-bottom: 1px solid #e5e5e5; }
+  table.results td.num { font-family: 'Courier New', monospace; }
+  table.results td.status { font-weight: 700; letter-spacing: 0.5px; font-size: 11px; }
+  table.results td.status.pass { color: #2E9E5B; }
+  table.results td.status.fail { color: #D1453B; }
+  .summary { display: flex; justify-content: center; gap: 48px; margin: 8px 0 36px; font-family: Arial, sans-serif; text-align: center; }
+  .summary .num { font-size: 24px; font-weight: 800; color: #155830; }
+  .summary .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: #888; margin-top: 2px; }
+  .summary .num.alert { color: #D1453B; }
+  .footer { margin-top: 60px; font-family: Arial, sans-serif; font-size: 10px; color: #999; display: flex; justify-content: space-between; border-top: 1px solid #eee; padding-top: 14px; }
+  .print-bar { text-align: center; margin-bottom: 24px; }
+  .print-bar button { font-family: Arial, sans-serif; background: #155830; color: #fff; border: none; padding: 10px 22px; border-radius: 6px; font-size: 13px; cursor: pointer; }
+  @media print { .print-bar { display: none; } body { padding: 0; } }
+</style>
+</head>
+<body>
+  <div class="print-bar"><button onclick="window.print()">Print / Save as PDF</button></div>
+
+  <div class="wordmark"><span class="a">URBN</span><span class="b">FETTCH</span></div>
+  <div class="tagline">A UNIT OF SANIL CHEMICALS &nbsp;·&nbsp; ${brandLabel.toUpperCase()}</div>
+
+  <hr class="rule" />
+
+  <div class="doc-title">Inventory Report</div>
+  <div class="doc-sub">${filterLabel}</div>
+
+  <table class="meta">
+    <tr><td class="label">Division</td><td class="value">${brandLabel}</td></tr>
+    <tr><td class="label">Filter</td><td class="value">${filterLabel}</td></tr>
+    <tr><td class="label">Date</td><td class="value">${new Date().toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" })}</td></tr>
+  </table>
+
+  <div class="summary">
+    <div><div class="num">${items.length}</div><div class="lbl">Item${items.length !== 1 ? "s" : ""}</div></div>
+    <div><div class="num ${lowCount > 0 ? "alert" : ""}">${lowCount}</div><div class="lbl">At/Below Reorder</div></div>
+  </div>
+
+  <table class="results">
+    <thead>
+      <tr>
+        <th>Item</th><th>Category</th><th>Qty</th><th>Reorder At</th><th>Status</th><th>Supplier</th>${canViewCosting ? "<th>Avg Cost</th>" : ""}
+      </tr>
+    </thead>
+    <tbody>
+      ${rows || `<tr><td colspan="${canViewCosting ? 7 : 6}" style="text-align:center;color:#999;padding:24px;">No items in this view.</td></tr>`}
+    </tbody>
+  </table>
+
+  <div class="footer">
+    <span>Generated ${fmtDate(new Date().toISOString())}</span>
+    <span>System-generated report — URBNFETTCH Inventory Tracker</span>
+  </div>
+</body>
+</html>`;
+}
+
 function todayStr() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -2901,14 +3001,28 @@ function AuthenticatedApp() {
               </button>
             ))}
           </div>
-          {isBoss && (
+          <div className="flex items-center gap-3 shrink-0">
             <button
-              onClick={() => setShowBulkImport(!showBulkImport)}
-              className="flex items-center gap-1 text-[11px] shrink-0 text-zinc-500"
+              onClick={() => {
+                const filterLabel = filter === "All" ? "All Items" : filter === "Low stock" ? "Low Stock Items" : `${filter} Items`;
+                const win = window.open("", "_blank");
+                if (!win) return;
+                win.document.write(buildItemsReportHTML(visible, meta.label, filterLabel, canViewCosting));
+                win.document.close();
+              }}
+              className="flex items-center gap-1 text-[11px] text-zinc-500"
             >
-              <UploadCloud size={13} /> Bulk import
+              <Download size={13} /> Save PDF
             </button>
-          )}
+            {isBoss && (
+              <button
+                onClick={() => setShowBulkImport(!showBulkImport)}
+                className="flex items-center gap-1 text-[11px] text-zinc-500"
+              >
+                <UploadCloud size={13} /> Bulk import
+              </button>
+            )}
+          </div>
         </div>
       )}
 
