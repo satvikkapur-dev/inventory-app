@@ -63,7 +63,7 @@ const USERS = [
   { name: "SCPL", pin: "8941", role: "staff", canViewCosting: true },
   { name: "Vijay", pin: "2314", role: "staff", canViewCosting: false },
   { name: "Jyoti", pin: "3214", role: "staff", canViewCosting: false },
-  { name: "Angad", pin: "4512", role: "staff", canViewCosting: false, canEnterPrice: true },
+  { name: "Angad", pin: "4512", role: "staff", canViewCosting: false, canEnterPrice: true, canLogSamples: true },
   { name: "Mohit", pin: "4213", role: "lab", canViewCosting: false },
   { name: "Kishore", pin: "9876", role: "homecare_orders", canViewCosting: false },
 ];
@@ -2443,6 +2443,7 @@ function AuthenticatedApp() {
   const isLabOnly = session?.role === "lab";
   const isHomecareOrdersOnly = session?.role === "homecare_orders";
   const canSeeLabTab = canViewCosting || isLabOnly;
+  const samplesOnly = !!session?.canLogSamples && !canSeeLabTab;
   const [labResetKey, setLabResetKey] = useState(0);
 
   useEffect(() => {
@@ -2451,10 +2452,11 @@ function AuthenticatedApp() {
       setTab("orders");
       setBrand("homecare");
     }
+    if (samplesOnly) setLabSubTab("samples");
   }, [session]);
 
   const handleLogin = (user) => {
-    saveSession({ name: user.name, role: user.role, canViewCosting: !!user.canViewCosting, canEnterPrice: !!user.canEnterPrice });
+    saveSession({ name: user.name, role: user.role, canViewCosting: !!user.canViewCosting, canEnterPrice: !!user.canEnterPrice, canLogSamples: !!user.canLogSamples });
     record(user.name, user.role);
   };
 
@@ -2832,7 +2834,7 @@ function AuthenticatedApp() {
               { key: "planning", label: "Production Planning", icon: ClipboardCheck },
               { key: "production", label: "Production", icon: Factory },
               { key: "sales", label: "Sales", icon: ShoppingCart },
-              ...(canSeeLabTab ? [{ key: "lab", label: "Lab", icon: FlaskConical }] : []),
+              ...(canSeeLabTab ? [{ key: "lab", label: "Lab", icon: FlaskConical }] : samplesOnly ? [{ key: "lab", label: "Samples", icon: Inbox }] : []),
               { key: "history", label: "History", icon: HistoryIcon },
               ...(isBoss ? [{ key: "logins", label: "Logins", icon: Shield }] : []),
             ]
@@ -3007,24 +3009,26 @@ function AuthenticatedApp() {
           </>
         ) : tab === "lab" ? (
           <>
-            <div className="flex gap-1.5 mb-3">
-              {[{ key: "tests", label: "Tests" }, { key: "samples", label: "Samples" }].map((s) => (
-                <button
-                  key={s.key}
-                  onClick={() => setLabSubTab(s.key)}
-                  className="px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors"
-                  style={{
-                    background: labSubTab === s.key ? meta.accent : "transparent",
-                    color: labSubTab === s.key ? "#ffffff" : "#6B7280",
-                    border: labSubTab === s.key ? "none" : "1px solid #00000014",
-                  }}
-                >
-                  {s.label}
-                </button>
-              ))}
-            </div>
+            {!samplesOnly && (
+              <div className="flex gap-1.5 mb-3">
+                {[{ key: "tests", label: "Tests" }, { key: "samples", label: "Samples" }].map((s) => (
+                  <button
+                    key={s.key}
+                    onClick={() => setLabSubTab(s.key)}
+                    className="px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors"
+                    style={{
+                      background: labSubTab === s.key ? meta.accent : "transparent",
+                      color: labSubTab === s.key ? "#ffffff" : "#6B7280",
+                      border: labSubTab === s.key ? "none" : "1px solid #00000014",
+                    }}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            )}
 
-            {labSubTab === "tests" ? (
+            {labSubTab === "tests" && !samplesOnly ? (
               <>
                 {showLabForm && (
                   <LabForm
