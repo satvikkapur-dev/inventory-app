@@ -63,7 +63,7 @@ const USERS = [
   { name: "SCPL", pin: "8941", role: "staff", canViewCosting: true },
   { name: "Vijay", pin: "2314", role: "staff", canViewCosting: false },
   { name: "Jyoti", pin: "3214", role: "staff", canViewCosting: false },
-  { name: "Angad", pin: "4512", role: "staff", canViewCosting: false, canEnterPrice: true, canLogSamples: true },
+  { name: "Angad", pin: "4512", role: "staff", canViewCosting: false, canEnterPrice: true, canLogSamples: true, canEditProduction: true },
   { name: "Mohit", pin: "4213", role: "lab", canViewCosting: false },
   { name: "Kishore", pin: "9876", role: "homecare_orders", canViewCosting: false },
 ];
@@ -382,6 +382,173 @@ function addStockInLot(item, qty, price) {
   }
   const newQty = lots.reduce((s, l) => s + l.qty, 0);
   return { qty: newQty, lots };
+}
+
+// Applies a production batch's stock effects (consumes raw materials +
+// container, produces the finished good) against plain items/sharedItems
+// arrays and returns the updated arrays plus the finalized batch record
+// (with real unit costs and costing filled in). Pure — callers persist the
+// result. actorName attributes the resulting stock-movement history entries
+// (separate from batch.by, which is who logged/owns the batch record).
+function applyBatchStock(batch, items, sharedItems, actorName) {
+  let materialCost = 0;
+  const finalMaterials = [];
+  let nextItems = [...items];
+  let nextSharedItems = [...sharedItems];
+
+  for (const m of batch.materials) {
+    const inBrandIdx = nextItems.findIndex((i) => i.id === m.itemId);
+    const inSharedIdx = nextSharedItems.findIndex((i) => i.id === m.itemId);
+    const list = inBrandIdx >= 0 ? nextItems : inSharedIdx >= 0 ? nextSharedItems : null;
+    const idx = inBrandIdx >= 0 ? inBrandIdx : inSharedIdx;
+    if (!list || idx < 0) continue;
+
+    const original = list[idx];
+    const { cost, newQty, newLots, unitCostUsed } = consumeMaterial(original, m.qty);
+    materialCost += cost;
+    finalMaterials.push({ ...m, unitCostUsed });
+
+    const updatedItem = {
+      ...original,
+      qty: newQty,
+      lots: newLots,
+      history: [
+        { id: uid(), type: "out", qty: m.qty, date: new Date().toISOString(), note: `Used in batch ${batch.batchNumber} (${batch.productName})`, priceNote: unitCostUsed ? `₹${unitCostUsed.toFixed(2)}/${m.unit}` : null, by: actorName },
+        ...original.history,
+      ],
+    };
+    if (inBrandIdx >= 0) nextItems[idx] = updatedItem;
+    else nextSharedItems[idx] = updatedItem;
+  }
+
+  let containerUsed = null;
+  if (batch.containerId) {
+    const inBrandIdx = nextItems.findIndex((i) => i.id === batch.containerId);
+    const inSharedIdx = nextSharedItems.findIndex((i) => i.id === batch.containerId);
+    const list = inBrandIdx >= 0 ? nextItems : inSharedIdx >= 0 ? nextSharedItems : null;
+    const idx = inBrandIdx >= 0 ? inBrandIdx : inSharedIdx;
+    if (list && idx >= 0) {
+      const original = list[idx];
+      const capacityKg = original.capacityKg || 1;
+      const unitsUsed = Math.ceil(batch.outputQty / capacityKg);
+      const { cost, newQty, newLots, unitCostUsed } = consumeMaterial(original, unitsUsed);
+      containerUsed = { itemId: original.id, itemName: original.name, unitsUsed, capacityKg, unitCostUsed, cost };
+
+      const updatedContainer = {
+        ...original,
+        qty: newQty,
+        lots: newLots,
+        history: [
+          { id: uid(), type: "out", qty: unitsUsed, date: new Date().toISOString(), note: `Used as container for batch ${batch.batchNumber} (${batch.productName})`, priceNote: unitCostUsed ? `₹${unitCostUsed.toFixed(2)}/unit` : null, by: actorName },
+          ...original.history,
+        ],
+      };
+      if (inBrandIdx >= 0) nextItems[idx] = updatedContainer;
+      else nextSharedItems[idx] = updatedContainer;
+    }
+  }
+
+  const laborCost = materialCost * LABOR_RATE;
+  const canCost = containerUsed ? containerUsed.cost : 0;
+  const totalCost = materialCost + laborCost + canCost;
+  const costPerKg = batch.outputQty > 0 ? totalCost / batch.outputQty : 0;
+  const gstAmount = totalCost * GST_RATE;
+  const costPerKgWithGst = batch.outputQty > 0 ? (totalCost + gstAmount) / batch.outputQty : 0;
+
+  const finalBatch = {
+    ...batch,
+    materials: finalMaterials,
+    containerUsed,
+    costing: { materialCost, laborCost, canCost, totalCost, costPerKg, gstAmount, costPerKgWithGst },
+  };
+
+  const existingFG = nextItems.find(
+    (i) => i.category === "Finished good" && i.name.trim().toLowerCase() === batch.productName.trim().toLowerCase()
+  );
+
+  if (existingFG) {
+    nextItems = nextItems.map((i) =>
+      i.id === existingFG.id
+        ? {
+            ...i,
+            qty: i.qty + batch.outputQty,
+            history: [
+              { id: uid(), type: "in", qty: batch.outputQty, date: new Date().toISOString(), note: `Produced — batch ${batch.batchNumber}`, by: actorName },
+              ...i.history,
+            ],
+          }
+        : i
+    );
+  } else {
+    nextItems = [
+      {
+        id: uid(),
+        name: batch.productName,
+        category: "Finished good",
+        qty: batch.outputQty,
+        unit: batch.outputUnit,
+        threshold: 0,
+        supplier: { name: "", contact: "", leadTime: null },
+        history: [
+          { id: uid(), type: "in", qty: batch.outputQty, date: new Date().toISOString(), note: `Produced — batch ${batch.batchNumber}`, by: actorName },
+        ],
+      },
+      ...nextItems,
+    ];
+  }
+
+  return { finalBatch, nextItems, nextSharedItems };
+}
+
+// Reverses a production batch's stock effects (restores consumed materials +
+// container, un-produces the finished good) against plain items/sharedItems
+// arrays. Pure — callers persist the result. Used for both deleting a batch
+// and editing one (reverse the old version, then applyBatchStock the new).
+function reverseBatchStock(batch, items, sharedItems, actorName) {
+  let nextItems = [...items];
+  let nextSharedItems = [...sharedItems];
+
+  const restoreConsumed = (itemId, qty, unitCostUsed) => {
+    const inBrandIdx = nextItems.findIndex((i) => i.id === itemId);
+    const inSharedIdx = nextSharedItems.findIndex((i) => i.id === itemId);
+    const list = inBrandIdx >= 0 ? nextItems : inSharedIdx >= 0 ? nextSharedItems : null;
+    const idx = inBrandIdx >= 0 ? inBrandIdx : inSharedIdx;
+    if (!list || idx < 0) return;
+
+    const original = list[idx];
+    const { qty: newQty, lots: newLots } = addStockInLot(original, qty, unitCostUsed || "");
+    const updated = {
+      ...original,
+      qty: newQty,
+      lots: newLots,
+      history: [
+        { id: uid(), type: "in", qty, date: new Date().toISOString(), note: `Reversed — batch ${batch.batchNumber} (${batch.productName})`, by: actorName },
+        ...original.history,
+      ],
+    };
+    if (inBrandIdx >= 0) nextItems[idx] = updated;
+    else nextSharedItems[idx] = updated;
+  };
+
+  (batch.materials || []).forEach((m) => restoreConsumed(m.itemId, m.qty, m.unitCostUsed));
+  if (batch.containerUsed) restoreConsumed(batch.containerUsed.itemId, batch.containerUsed.unitsUsed, batch.containerUsed.unitCostUsed);
+
+  const fgIdx = nextItems.findIndex(
+    (i) => i.category === "Finished good" && i.name.trim().toLowerCase() === batch.productName.trim().toLowerCase()
+  );
+  if (fgIdx >= 0) {
+    const fg = nextItems[fgIdx];
+    nextItems[fgIdx] = {
+      ...fg,
+      qty: Math.max(0, fg.qty - batch.outputQty),
+      history: [
+        { id: uid(), type: "out", qty: batch.outputQty, date: new Date().toISOString(), note: `Reversed — batch ${batch.batchNumber}`, by: actorName },
+        ...fg.history,
+      ],
+    };
+  }
+
+  return { nextItems, nextSharedItems };
 }
 
 function Wordmark({ size = "text-lg" }) {
@@ -1265,15 +1432,19 @@ function BulkImportForm({ accent, name, onImport, onClose }) {
   );
 }
 
-function ProductionForm({ accent, name, rawMaterials, containers, onSubmit, onClose }) {
-  const [productName, setProductName] = useState("");
-  const [batchNumber, setBatchNumber] = useState("");
-  const [date, setDate] = useState(todayStr());
-  const [machineNumber, setMachineNumber] = useState("");
-  const [outputQty, setOutputQty] = useState("");
-  const [outputUnit, setOutputUnit] = useState("kg");
-  const [containerId, setContainerId] = useState("");
-  const [rows, setRows] = useState([{ id: uid(), itemId: "", qty: "" }]);
+function ProductionForm({ accent, name, rawMaterials, containers, editingBatch, onSubmit, onClose }) {
+  const [productName, setProductName] = useState(editingBatch?.productName || "");
+  const [batchNumber, setBatchNumber] = useState(editingBatch?.batchNumber || "");
+  const [date, setDate] = useState(editingBatch?.date || todayStr());
+  const [machineNumber, setMachineNumber] = useState(editingBatch?.machineNumber || "");
+  const [outputQty, setOutputQty] = useState(editingBatch ? String(editingBatch.outputQty) : "");
+  const [outputUnit, setOutputUnit] = useState(editingBatch?.outputUnit || "kg");
+  const [containerId, setContainerId] = useState(editingBatch?.containerUsed?.itemId || "");
+  const [rows, setRows] = useState(
+    editingBatch && editingBatch.materials.length > 0
+      ? editingBatch.materials.map((m) => ({ id: uid(), itemId: m.itemId, qty: String(m.qty) }))
+      : [{ id: uid(), itemId: "", qty: "" }]
+  );
 
   const addRow = () => setRows([...rows, { id: uid(), itemId: "", qty: "" }]);
   const removeRow = (id) => setRows(rows.filter((r) => r.id !== id));
@@ -1294,7 +1465,7 @@ function ProductionForm({ accent, name, rawMaterials, containers, onSubmit, onCl
     if (materials.length === 0) return;
 
     onSubmit({
-      id: uid(),
+      id: editingBatch ? editingBatch.id : uid(),
       productName: productName.trim(),
       batchNumber: batchNumber.trim(),
       date,
@@ -1303,8 +1474,8 @@ function ProductionForm({ accent, name, rawMaterials, containers, onSubmit, onCl
       outputUnit,
       materials,
       containerId: containerId || null,
-      by: name,
-      createdAt: new Date().toISOString(),
+      by: editingBatch ? editingBatch.by : name,
+      createdAt: editingBatch ? editingBatch.createdAt : new Date().toISOString(),
     });
     onClose();
   };
@@ -1312,7 +1483,7 @@ function ProductionForm({ accent, name, rawMaterials, containers, onSubmit, onCl
   return (
     <div className="rounded-xl p-4 mb-3" style={{ background: "#F3F5F4", border: "1px solid #00000012" }}>
       <div className="flex justify-between items-center mb-3">
-        <span className="text-sm font-semibold tracking-wide" style={{ color: accent }}>NEW PRODUCTION BATCH</span>
+        <span className="text-sm font-semibold tracking-wide" style={{ color: accent }}>{editingBatch ? "EDIT PRODUCTION BATCH" : "NEW PRODUCTION BATCH"}</span>
         <button onClick={onClose} aria-label="Close form"><X size={16} className="text-zinc-400" /></button>
       </div>
 
@@ -1388,13 +1559,13 @@ function ProductionForm({ accent, name, rawMaterials, containers, onSubmit, onCl
       </div>
 
       <button onClick={submit} className="mt-4 w-full rounded-lg py-2 text-sm font-semibold" style={{ background: accent, color: "#ffffff" }}>
-        Log production &amp; update stock
+        {editingBatch ? "Save changes & update stock" : "Log production & update stock"}
       </button>
     </div>
   );
 }
 
-function ProductionCard({ batch, accent, isBoss, canViewCosting, onDelete, onUpdateCosting }) {
+function ProductionCard({ batch, accent, isBoss, canViewCosting, canEditProduction, onDelete, onUpdateCosting, onEdit }) {
   const [open, setOpen] = useState(false);
   const [editingCosting, setEditingCosting] = useState(false);
   const [priceEdits, setPriceEdits] = useState({});
@@ -1528,12 +1699,20 @@ function ProductionCard({ batch, accent, isBoss, canViewCosting, onDelete, onUpd
 
           <div className="text-[10px] text-zinc-400 flex items-center gap-1 mt-3">
             <User size={9} /> Logged by {batch.by} · {fmtDate(batch.createdAt)}
+            {batch.editedBy && ` · edited by ${batch.editedBy} · ${fmtDate(batch.editedAt)}`}
           </div>
-          {isBoss && (
-            <button onClick={() => onDelete(batch.id)} className="mt-3 flex items-center gap-1.5 text-xs text-zinc-400">
-              <Trash2 size={12} /> Remove batch (reverses stock used &amp; produced)
-            </button>
-          )}
+          <div className="mt-3 flex items-center gap-4">
+            {canEditProduction && (
+              <button onClick={() => onEdit(batch)} className="flex items-center gap-1.5 text-xs text-zinc-500">
+                <Pencil size={12} /> Edit batch
+              </button>
+            )}
+            {isBoss && (
+              <button onClick={() => onDelete(batch.id)} className="flex items-center gap-1.5 text-xs text-zinc-400">
+                <Trash2 size={12} /> Remove batch (reverses stock used &amp; produced)
+              </button>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -2553,6 +2732,7 @@ function AuthenticatedApp() {
   const [showForm, setShowForm] = useState(false);
   const [showBulkImport, setShowBulkImport] = useState(false);
   const [showProdForm, setShowProdForm] = useState(false);
+  const [editingBatch, setEditingBatch] = useState(null);
   const [showSalesForm, setShowSalesForm] = useState(false);
   const [showLabForm, setShowLabForm] = useState(false);
   const [showSampleForm, setShowSampleForm] = useState(false);
@@ -2573,6 +2753,7 @@ function AuthenticatedApp() {
   const isBoss = session?.role === "boss";
   const canViewCosting = !!session?.canViewCosting;
   const canEnterPrice = canViewCosting || !!session?.canEnterPrice;
+  const canEditProduction = isBoss || !!session?.canEditProduction;
   const isLabOnly = session?.role === "lab";
   const isHomecareOrdersOnly = session?.role === "homecare_orders";
   const canSeeLabTab = canViewCosting || isLabOnly;
@@ -2589,7 +2770,7 @@ function AuthenticatedApp() {
   }, [session]);
 
   const handleLogin = (user) => {
-    saveSession({ name: user.name, role: user.role, canViewCosting: !!user.canViewCosting, canEnterPrice: !!user.canEnterPrice, canLogSamples: !!user.canLogSamples });
+    saveSession({ name: user.name, role: user.role, canViewCosting: !!user.canViewCosting, canEnterPrice: !!user.canEnterPrice, canLogSamples: !!user.canLogSamples, canEditProduction: !!user.canEditProduction });
     record(user.name, user.role);
   };
 
@@ -2650,112 +2831,7 @@ function AuthenticatedApp() {
   const bulkAddItems = (newItems) => save([...newItems, ...items]);
 
   const logProduction = (batch) => {
-    let materialCost = 0;
-    const finalMaterials = [];
-    let nextItems = [...items];
-    let nextSharedItems = [...sharedItems];
-
-    for (const m of batch.materials) {
-      const inBrandIdx = nextItems.findIndex((i) => i.id === m.itemId);
-      const inSharedIdx = nextSharedItems.findIndex((i) => i.id === m.itemId);
-      const list = inBrandIdx >= 0 ? nextItems : inSharedIdx >= 0 ? nextSharedItems : null;
-      const idx = inBrandIdx >= 0 ? inBrandIdx : inSharedIdx;
-      if (!list || idx < 0) continue;
-
-      const original = list[idx];
-      const { cost, newQty, newLots, unitCostUsed } = consumeMaterial(original, m.qty);
-      materialCost += cost;
-      finalMaterials.push({ ...m, unitCostUsed });
-
-      const updatedItem = {
-        ...original,
-        qty: newQty,
-        lots: newLots,
-        history: [
-          { id: uid(), type: "out", qty: m.qty, date: new Date().toISOString(), note: `Used in batch ${batch.batchNumber} (${batch.productName})`, priceNote: unitCostUsed ? `₹${unitCostUsed.toFixed(2)}/${m.unit}` : null, by: batch.by },
-          ...original.history,
-        ],
-      };
-      if (inBrandIdx >= 0) nextItems[idx] = updatedItem;
-      else nextSharedItems[idx] = updatedItem;
-    }
-
-    let containerUsed = null;
-    if (batch.containerId) {
-      const inBrandIdx = nextItems.findIndex((i) => i.id === batch.containerId);
-      const inSharedIdx = nextSharedItems.findIndex((i) => i.id === batch.containerId);
-      const list = inBrandIdx >= 0 ? nextItems : inSharedIdx >= 0 ? nextSharedItems : null;
-      const idx = inBrandIdx >= 0 ? inBrandIdx : inSharedIdx;
-      if (list && idx >= 0) {
-        const original = list[idx];
-        const capacityKg = original.capacityKg || 1;
-        const unitsUsed = Math.ceil(batch.outputQty / capacityKg);
-        const { cost, newQty, newLots, unitCostUsed } = consumeMaterial(original, unitsUsed);
-        containerUsed = { itemId: original.id, itemName: original.name, unitsUsed, capacityKg, unitCostUsed, cost };
-
-        const updatedContainer = {
-          ...original,
-          qty: newQty,
-          lots: newLots,
-          history: [
-            { id: uid(), type: "out", qty: unitsUsed, date: new Date().toISOString(), note: `Used as container for batch ${batch.batchNumber} (${batch.productName})`, priceNote: unitCostUsed ? `₹${unitCostUsed.toFixed(2)}/unit` : null, by: batch.by },
-            ...original.history,
-          ],
-        };
-        if (inBrandIdx >= 0) nextItems[idx] = updatedContainer;
-        else nextSharedItems[idx] = updatedContainer;
-      }
-    }
-
-    const laborCost = materialCost * LABOR_RATE;
-    const canCost = containerUsed ? containerUsed.cost : 0;
-    const totalCost = materialCost + laborCost + canCost;
-    const costPerKg = batch.outputQty > 0 ? totalCost / batch.outputQty : 0;
-    const gstAmount = totalCost * GST_RATE;
-    const costPerKgWithGst = batch.outputQty > 0 ? (totalCost + gstAmount) / batch.outputQty : 0;
-
-    const finalBatch = {
-      ...batch,
-      materials: finalMaterials,
-      containerUsed,
-      costing: { materialCost, laborCost, canCost, totalCost, costPerKg, gstAmount, costPerKgWithGst },
-    };
-
-    const existingFG = nextItems.find(
-      (i) => i.category === "Finished good" && i.name.trim().toLowerCase() === batch.productName.trim().toLowerCase()
-    );
-
-    if (existingFG) {
-      nextItems = nextItems.map((i) =>
-        i.id === existingFG.id
-          ? {
-              ...i,
-              qty: i.qty + batch.outputQty,
-              history: [
-                { id: uid(), type: "in", qty: batch.outputQty, date: new Date().toISOString(), note: `Produced — batch ${batch.batchNumber}`, by: batch.by },
-                ...i.history,
-              ],
-            }
-          : i
-      );
-    } else {
-      nextItems = [
-        {
-          id: uid(),
-          name: batch.productName,
-          category: "Finished good",
-          qty: batch.outputQty,
-          unit: batch.outputUnit,
-          threshold: 0,
-          supplier: { name: "", contact: "", leadTime: null },
-          history: [
-            { id: uid(), type: "in", qty: batch.outputQty, date: new Date().toISOString(), note: `Produced — batch ${batch.batchNumber}`, by: batch.by },
-          ],
-        },
-        ...nextItems,
-      ];
-    }
-
+    const { finalBatch, nextItems, nextSharedItems } = applyBatchStock(batch, items, sharedItems, batch.by);
     save(nextItems);
     saveShared(nextSharedItems);
     saveBatches([finalBatch, ...batches]);
@@ -2767,52 +2843,28 @@ function AuthenticatedApp() {
     if (!batch) return;
     if (!window.confirm(`Remove batch ${batch.batchNumber} and reverse the stock it used/produced?`)) return;
 
-    let nextItems = [...items];
-    let nextSharedItems = [...sharedItems];
-
-    const restoreConsumed = (itemId, qty, unitCostUsed) => {
-      const inBrandIdx = nextItems.findIndex((i) => i.id === itemId);
-      const inSharedIdx = nextSharedItems.findIndex((i) => i.id === itemId);
-      const list = inBrandIdx >= 0 ? nextItems : inSharedIdx >= 0 ? nextSharedItems : null;
-      const idx = inBrandIdx >= 0 ? inBrandIdx : inSharedIdx;
-      if (!list || idx < 0) return;
-
-      const original = list[idx];
-      const { qty: newQty, lots: newLots } = addStockInLot(original, qty, unitCostUsed || "");
-      const updated = {
-        ...original,
-        qty: newQty,
-        lots: newLots,
-        history: [
-          { id: uid(), type: "in", qty, date: new Date().toISOString(), note: `Reversed — batch ${batch.batchNumber} (${batch.productName}) deleted`, by: session.name },
-          ...original.history,
-        ],
-      };
-      if (inBrandIdx >= 0) nextItems[idx] = updated;
-      else nextSharedItems[idx] = updated;
-    };
-
-    (batch.materials || []).forEach((m) => restoreConsumed(m.itemId, m.qty, m.unitCostUsed));
-    if (batch.containerUsed) restoreConsumed(batch.containerUsed.itemId, batch.containerUsed.unitsUsed, batch.containerUsed.unitCostUsed);
-
-    const fgIdx = nextItems.findIndex(
-      (i) => i.category === "Finished good" && i.name.trim().toLowerCase() === batch.productName.trim().toLowerCase()
-    );
-    if (fgIdx >= 0) {
-      const fg = nextItems[fgIdx];
-      nextItems[fgIdx] = {
-        ...fg,
-        qty: Math.max(0, fg.qty - batch.outputQty),
-        history: [
-          { id: uid(), type: "out", qty: batch.outputQty, date: new Date().toISOString(), note: `Reversed — batch ${batch.batchNumber} deleted`, by: session.name },
-          ...fg.history,
-        ],
-      };
-    }
-
+    const { nextItems, nextSharedItems } = reverseBatchStock(batch, items, sharedItems, session.name);
     save(nextItems);
     saveShared(nextSharedItems);
     saveBatches(batches.filter((b) => b.id !== id));
+  };
+
+  // Edits an existing batch: reverses its old stock effects, then applies
+  // the edited version's effects (new materials/qty/container/output) on
+  // top of that — so quantities, materials, and cans can all change in one
+  // go without manual reconciliation.
+  const updateBatch = (editedBatch) => {
+    if (!canEditProduction) return;
+    const original = batches.find((b) => b.id === editedBatch.id);
+    if (!original) return;
+
+    const { nextItems: reversedItems, nextSharedItems: reversedShared } = reverseBatchStock(original, items, sharedItems, session.name);
+    const { finalBatch, nextItems, nextSharedItems } = applyBatchStock(editedBatch, reversedItems, reversedShared, session.name);
+    const finalBatchWithEditTrail = { ...finalBatch, editedBy: session.name, editedAt: new Date().toISOString() };
+
+    save(nextItems);
+    saveShared(nextSharedItems);
+    saveBatches(batches.map((b) => (b.id === editedBatch.id ? finalBatchWithEditTrail : b)));
   };
 
   // Corrects the recorded ₹/unit for a batch's materials after the fact
@@ -3107,17 +3159,18 @@ function AuthenticatedApp() {
           />
         ) : tab === "production" ? (
           <>
-            {showProdForm && (
+            {(showProdForm || editingBatch) && (
               <ProductionForm
                 accent={meta.accent}
                 name={session.name}
                 rawMaterials={rawMaterials}
                 containers={containers}
-                onClose={() => setShowProdForm(false)}
-                onSubmit={logProduction}
+                editingBatch={editingBatch}
+                onClose={() => { setShowProdForm(false); setEditingBatch(null); }}
+                onSubmit={editingBatch ? updateBatch : logProduction}
               />
             )}
-            {batches.length === 0 && !showProdForm && (
+            {batches.length === 0 && !showProdForm && !editingBatch && (
               <div className="text-center py-14">
                 <Factory size={28} className="mx-auto text-zinc-300 mb-2" />
                 <p className="text-sm text-zinc-500">No production logged yet for {meta.label}.</p>
@@ -3126,7 +3179,17 @@ function AuthenticatedApp() {
             )}
             <div className="space-y-2">
               {batches.map((batch) => (
-                <ProductionCard key={batch.id} batch={batch} accent={meta.accent} isBoss={isBoss} canViewCosting={canViewCosting} onDelete={deleteBatch} onUpdateCosting={updateBatchCosting} />
+                <ProductionCard
+                  key={batch.id}
+                  batch={batch}
+                  accent={meta.accent}
+                  isBoss={isBoss}
+                  canViewCosting={canViewCosting}
+                  canEditProduction={canEditProduction}
+                  onDelete={deleteBatch}
+                  onUpdateCosting={updateBatchCosting}
+                  onEdit={(b) => { setEditingBatch(b); setShowProdForm(false); }}
+                />
               ))}
             </div>
           </>
@@ -3294,7 +3357,7 @@ function AuthenticatedApp() {
 
       {tab === "production" && (
         <button
-          onClick={() => setShowProdForm(true)}
+          onClick={() => { setEditingBatch(null); setShowProdForm(true); }}
           className="fixed bottom-6 right-6 w-12 h-12 rounded-full flex items-center justify-center shadow-lg"
           style={{ background: meta.accent }}
           aria-label="Log new production batch"
