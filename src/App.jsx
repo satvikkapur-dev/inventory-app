@@ -2005,12 +2005,34 @@ function OrderCard({ order, accent, isBoss, onUpdateStatus, onDelete }) {
   );
 }
 
-function LabForm({ accent, name, onSubmit, onClose, hideClose }) {
-  const [testingNumber, setTestingNumber] = useState("");
-  const [batchNumber, setBatchNumber] = useState("");
-  const [productName, setProductName] = useState("");
-  const [date, setDate] = useState(todayStr());
-  const [params, setParams] = useState([{ id: uid(), name: "", testMethod: "", result: "", unit: "", specMin: "", specMax: "" }]);
+// A spec bound or result can be a number (for range comparisons) or free
+// text (for qualitative tests like Appearance, compared as an exact match).
+function parseSpecValue(raw) {
+  const trimmed = (raw ?? "").toString().trim();
+  if (trimmed === "") return { value: null, isNumeric: false, isEmpty: true };
+  const num = Number(trimmed);
+  const isNumeric = !isNaN(num) && isFinite(num);
+  return { value: isNumeric ? num : trimmed, isNumeric, isEmpty: false };
+}
+
+function LabForm({ accent, name, editingTest, onSubmit, onClose, hideClose }) {
+  const [testingNumber, setTestingNumber] = useState(editingTest?.testingNumber || "");
+  const [batchNumber, setBatchNumber] = useState(editingTest?.batchNumber || "");
+  const [productName, setProductName] = useState(editingTest?.productName || "");
+  const [date, setDate] = useState(editingTest?.date || todayStr());
+  const [params, setParams] = useState(
+    editingTest && editingTest.parameters.length > 0
+      ? editingTest.parameters.map((p) => ({
+          id: p.id,
+          name: p.name,
+          testMethod: p.testMethod || "",
+          result: String(p.result),
+          unit: p.unit || "",
+          specMin: p.specMin != null ? String(p.specMin) : "",
+          specMax: p.specMax != null ? String(p.specMax) : "",
+        }))
+      : [{ id: uid(), name: "", testMethod: "", result: "", unit: "", specMin: "", specMax: "" }]
+  );
 
   const addParam = () => setParams([...params, { id: uid(), name: "", testMethod: "", result: "", unit: "", specMin: "", specMax: "" }]);
   const removeParam = (id) => setParams(params.filter((p) => p.id !== id));
@@ -2021,33 +2043,49 @@ function LabForm({ accent, name, onSubmit, onClose, hideClose }) {
     const finalParams = params
       .filter((p) => p.name.trim() && p.result.trim() !== "")
       .map((p) => {
-        const raw = p.result.trim();
-        const numeric = Number(raw);
-        // Some tests (e.g. Appearance) have a qualitative result like "Clear,
-        // colorless liquid" rather than a number — keep those as text and skip
-        // pass/fail, since there's nothing numeric to compare against a spec.
-        const isNumeric = raw !== "" && !isNaN(numeric) && isFinite(numeric);
-        const result = isNumeric ? numeric : raw;
-        const min = p.specMin !== "" ? Number(p.specMin) : null;
-        const max = p.specMax !== "" ? Number(p.specMax) : null;
-        const hasSpec = isNumeric && (min !== null || max !== null);
-        const pass = hasSpec ? (min === null || result >= min) && (max === null || result <= max) : null;
-        return { id: p.id, name: p.name.trim(), testMethod: p.testMethod.trim(), result, unit: p.unit.trim(), specMin: min, specMax: max, pass };
+        const result = parseSpecValue(p.result);
+        const min = parseSpecValue(p.specMin);
+        const max = parseSpecValue(p.specMax);
+        const hasSpec = !min.isEmpty || !max.isEmpty;
+
+        let pass = null;
+        if (hasSpec) {
+          if (result.isNumeric && (min.isEmpty || min.isNumeric) && (max.isEmpty || max.isNumeric)) {
+            // Numeric range comparison.
+            pass = (min.isEmpty || result.value >= min.value) && (max.isEmpty || result.value <= max.value);
+          } else {
+            // Qualitative comparison — spec min (or max, if min is blank) is
+            // treated as the expected value and matched exactly.
+            const expected = !min.isEmpty ? min.value : max.value;
+            pass = String(result.value).trim().toLowerCase() === String(expected).trim().toLowerCase();
+          }
+        }
+
+        return {
+          id: p.id,
+          name: p.name.trim(),
+          testMethod: p.testMethod.trim(),
+          result: result.value,
+          unit: p.unit.trim(),
+          specMin: min.isEmpty ? null : min.value,
+          specMax: max.isEmpty ? null : max.value,
+          pass,
+        };
       });
     if (finalParams.length === 0) return;
     const specced = finalParams.filter((p) => p.pass !== null);
     const overallPass = specced.length === 0 ? null : specced.every((p) => p.pass);
 
     onSubmit({
-      id: uid(),
+      id: editingTest ? editingTest.id : uid(),
       testingNumber: testingNumber.trim(),
       batchNumber: batchNumber.trim(),
       productName: productName.trim(),
       date,
       parameters: finalParams,
       overallPass,
-      by: name,
-      createdAt: new Date().toISOString(),
+      by: editingTest ? editingTest.by : name,
+      createdAt: editingTest ? editingTest.createdAt : new Date().toISOString(),
     });
     onClose();
   };
@@ -2055,7 +2093,7 @@ function LabForm({ accent, name, onSubmit, onClose, hideClose }) {
   return (
     <div className="rounded-xl p-4 mb-3" style={{ background: "#F3F5F4", border: "1px solid #00000012" }}>
       <div className="flex justify-between items-center mb-3">
-        <span className="text-sm font-semibold tracking-wide" style={{ color: accent }}>NEW LAB TEST</span>
+        <span className="text-sm font-semibold tracking-wide" style={{ color: accent }}>{editingTest ? "EDIT LAB TEST" : "NEW LAB TEST"}</span>
         {!hideClose && <button onClick={onClose} aria-label="Close form"><X size={16} className="text-zinc-400" /></button>}
       </div>
       <div className="grid grid-cols-2 gap-2">
@@ -2067,7 +2105,7 @@ function LabForm({ accent, name, onSubmit, onClose, hideClose }) {
 
       <div className="mt-3">
         <div className="text-[10px] uppercase tracking-wide text-zinc-400 mb-1.5">Test parameters</div>
-        <p className="text-[10px] text-zinc-400 mb-1.5">Spec min/max are optional — leave both blank to just log a result, with no pass/fail forced on it.</p>
+        <p className="text-[10px] text-zinc-400 mb-1.5">Spec min/max are optional and can be numbers or text (e.g. an expected Appearance) — leave both blank to just log a result, with no pass/fail forced on it.</p>
         <div className="space-y-2">
           {params.map((p) => (
             <div key={p.id} className="rounded-lg p-2" style={{ background: "#FFFFFF", border: "1px solid #00000012" }}>
@@ -2085,8 +2123,8 @@ function LabForm({ accent, name, onSubmit, onClose, hideClose }) {
               <div className="grid grid-cols-2 gap-1.5">
                 <input placeholder="Result (number or text, e.g. Clear liquid)" value={p.result} onChange={(e) => updateParam(p.id, { result: e.target.value })} className={inputCls} />
                 <input placeholder="Unit (e.g. cP)" value={p.unit} onChange={(e) => updateParam(p.id, { unit: e.target.value })} className={inputCls} />
-                <input placeholder="Spec min" type="number" value={p.specMin} onChange={(e) => updateParam(p.id, { specMin: e.target.value })} className={inputCls} />
-                <input placeholder="Spec max" type="number" value={p.specMax} onChange={(e) => updateParam(p.id, { specMax: e.target.value })} className={inputCls} />
+                <input placeholder="Spec min (or expected value)" value={p.specMin} onChange={(e) => updateParam(p.id, { specMin: e.target.value })} className={inputCls} />
+                <input placeholder="Spec max (optional)" value={p.specMax} onChange={(e) => updateParam(p.id, { specMax: e.target.value })} className={inputCls} />
               </div>
             </div>
           ))}
@@ -2097,13 +2135,13 @@ function LabForm({ accent, name, onSubmit, onClose, hideClose }) {
       </div>
 
       <button onClick={submit} className="mt-4 w-full rounded-lg py-2 text-sm font-semibold" style={{ background: accent, color: "#ffffff" }}>
-        Log test result
+        {editingTest ? "Save changes" : "Log test result"}
       </button>
     </div>
   );
 }
 
-function LabCard({ test, accent, brandLabel, isBoss, onDelete }) {
+function LabCard({ test, accent, brandLabel, isBoss, onDelete, onEdit }) {
   const [open, setOpen] = useState(false);
   const downloadReport = () => {
     const win = window.open("", "_blank");
@@ -2150,10 +2188,10 @@ function LabCard({ test, accent, brandLabel, isBoss, onDelete }) {
                   </div>
                   <div className="text-right shrink-0 ml-2">
                     <span className="mono-font font-semibold" style={{ color: pColor }}>{p.result}{typeof p.result === "number" ? p.unit : ""}</span>
-                    {(p.specMin != null || p.specMax != null) ? (
-                      <span className="text-zinc-400 ml-1">
-                        (spec {p.specMin != null ? p.specMin : "–"}–{p.specMax != null ? p.specMax : "–"})
-                      </span>
+                    {p.specMin != null && p.specMax != null ? (
+                      <span className="text-zinc-400 ml-1">(spec {p.specMin}–{p.specMax})</span>
+                    ) : p.specMin != null || p.specMax != null ? (
+                      <span className="text-zinc-400 ml-1">(expected {p.specMin != null ? p.specMin : p.specMax})</span>
                     ) : (
                       <span className="text-zinc-400 ml-1">(no spec)</span>
                     )}
@@ -2164,11 +2202,17 @@ function LabCard({ test, accent, brandLabel, isBoss, onDelete }) {
           </div>
           <div className="text-[10px] text-zinc-400 flex items-center gap-1 mt-3">
             <User size={9} /> Logged by {test.by} · {fmtDate(test.createdAt)}
+            {test.editedBy && ` · edited by ${test.editedBy} · ${fmtDate(test.editedAt)}`}
           </div>
           <div className="mt-3 flex items-center gap-4">
             <button onClick={downloadReport} className="flex items-center gap-1.5 text-xs" style={{ color: accent }}>
               <Download size={12} /> Download report
             </button>
+            {isBoss && (
+              <button onClick={() => onEdit(test)} className="flex items-center gap-1.5 text-xs text-zinc-500">
+                <Pencil size={12} /> Edit test
+              </button>
+            )}
             {isBoss && (
               <button onClick={() => onDelete(test.id)} className="flex items-center gap-1.5 text-xs text-zinc-400">
                 <Trash2 size={12} /> Remove test record
@@ -2745,6 +2789,7 @@ function AuthenticatedApp() {
   const [editingBatch, setEditingBatch] = useState(null);
   const [showSalesForm, setShowSalesForm] = useState(false);
   const [showLabForm, setShowLabForm] = useState(false);
+  const [editingTest, setEditingTest] = useState(null);
   const [showSampleForm, setShowSampleForm] = useState(false);
   const [labSubTab, setLabSubTab] = useState("tests");
   const [showOrderForm, setShowOrderForm] = useState(false);
@@ -2942,6 +2987,11 @@ function AuthenticatedApp() {
   const deleteLabTest = (id) => {
     if (!isBoss) return;
     saveTests(tests.filter((t) => t.id !== id));
+  };
+  const updateLabTest = (editedTest) => {
+    if (!isBoss) return;
+    const finalTest = { ...editedTest, editedBy: session.name, editedAt: new Date().toISOString() };
+    saveTests(tests.map((t) => (t.id === editedTest.id ? finalTest : t)));
   };
 
   const addSample = (sample) => saveSamples([sample, ...samples]);
@@ -3250,15 +3300,16 @@ function AuthenticatedApp() {
 
             {labSubTab === "tests" && !samplesOnly ? (
               <>
-                {showLabForm && (
+                {(showLabForm || editingTest) && (
                   <LabForm
                     accent={meta.accent}
                     name={session.name}
-                    onClose={() => setShowLabForm(false)}
-                    onSubmit={addLabTest}
+                    editingTest={editingTest}
+                    onClose={() => { setShowLabForm(false); setEditingTest(null); }}
+                    onSubmit={editingTest ? updateLabTest : addLabTest}
                   />
                 )}
-                {tests.length === 0 && !showLabForm && (
+                {tests.length === 0 && !showLabForm && !editingTest && (
                   <div className="text-center py-14">
                     <FlaskConical size={28} className="mx-auto text-zinc-300 mb-2" />
                     <p className="text-sm text-zinc-500">No lab tests logged yet for {meta.label}.</p>
@@ -3267,7 +3318,15 @@ function AuthenticatedApp() {
                 )}
                 <div className="space-y-2">
                   {tests.map((test) => (
-                    <LabCard key={test.id} test={test} accent={meta.accent} brandLabel={meta.label} isBoss={isBoss} onDelete={deleteLabTest} />
+                    <LabCard
+                      key={test.id}
+                      test={test}
+                      accent={meta.accent}
+                      brandLabel={meta.label}
+                      isBoss={isBoss}
+                      onDelete={deleteLabTest}
+                      onEdit={(t) => { setEditingTest(t); setShowLabForm(false); }}
+                    />
                   ))}
                 </div>
               </>
@@ -3389,7 +3448,10 @@ function AuthenticatedApp() {
 
       {tab === "lab" && (
         <button
-          onClick={() => (labSubTab === "tests" ? setShowLabForm(true) : setShowSampleForm(true))}
+          onClick={() => {
+            if (labSubTab === "tests") { setEditingTest(null); setShowLabForm(true); }
+            else setShowSampleForm(true);
+          }}
           className="fixed bottom-6 right-6 w-12 h-12 rounded-full flex items-center justify-center shadow-lg"
           style={{ background: meta.accent }}
           aria-label={labSubTab === "tests" ? "Log new lab test" : "Log new sample"}
