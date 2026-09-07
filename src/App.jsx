@@ -2030,11 +2030,12 @@ function LabForm({ accent, name, editingTest, onSubmit, onClose, hideClose }) {
           unit: p.unit || "",
           specMin: p.specMin != null ? String(p.specMin) : "",
           specMax: p.specMax != null ? String(p.specMax) : "",
+          override: p.override || "auto",
         }))
-      : [{ id: uid(), name: "", testMethod: "", result: "", unit: "", specMin: "", specMax: "" }]
+      : [{ id: uid(), name: "", testMethod: "", result: "", unit: "", specMin: "", specMax: "", override: "auto" }]
   );
 
-  const addParam = () => setParams([...params, { id: uid(), name: "", testMethod: "", result: "", unit: "", specMin: "", specMax: "" }]);
+  const addParam = () => setParams([...params, { id: uid(), name: "", testMethod: "", result: "", unit: "", specMin: "", specMax: "", override: "auto" }]);
   const removeParam = (id) => setParams(params.filter((p) => p.id !== id));
   const updateParam = (id, patch) => setParams(params.map((p) => (p.id === id ? { ...p, ...patch } : p)));
 
@@ -2048,18 +2049,23 @@ function LabForm({ accent, name, editingTest, onSubmit, onClose, hideClose }) {
         const max = parseSpecValue(p.specMax);
         const hasSpec = !min.isEmpty || !max.isEmpty;
 
-        let pass = null;
+        let autoPass = null;
         if (hasSpec) {
           if (result.isNumeric && (min.isEmpty || min.isNumeric) && (max.isEmpty || max.isNumeric)) {
             // Numeric range comparison.
-            pass = (min.isEmpty || result.value >= min.value) && (max.isEmpty || result.value <= max.value);
+            autoPass = (min.isEmpty || result.value >= min.value) && (max.isEmpty || result.value <= max.value);
           } else {
             // Qualitative comparison — spec min (or max, if min is blank) is
-            // treated as the expected value and matched exactly.
+            // treated as the expected value and matched exactly. Text specs
+            // are inherently a judgment call (e.g. Appearance), so this is a
+            // starting point — the override below is what actually decides it.
             const expected = !min.isEmpty ? min.value : max.value;
-            pass = String(result.value).trim().toLowerCase() === String(expected).trim().toLowerCase();
+            autoPass = String(result.value).trim().toLowerCase() === String(expected).trim().toLowerCase();
           }
         }
+        // A manual override (set by whoever actually looked at/tested the
+        // sample) always wins over the auto-comparison.
+        const pass = p.override === "pass" ? true : p.override === "fail" ? false : autoPass;
 
         return {
           id: p.id,
@@ -2069,6 +2075,7 @@ function LabForm({ accent, name, editingTest, onSubmit, onClose, hideClose }) {
           unit: p.unit.trim(),
           specMin: min.isEmpty ? null : min.value,
           specMax: max.isEmpty ? null : max.value,
+          override: p.override !== "auto" ? p.override : null,
           pass,
         };
       });
@@ -2125,6 +2132,29 @@ function LabForm({ accent, name, editingTest, onSubmit, onClose, hideClose }) {
                 <input placeholder="Unit (e.g. cP)" value={p.unit} onChange={(e) => updateParam(p.id, { unit: e.target.value })} className={inputCls} />
                 <input placeholder="Spec min (or expected value)" value={p.specMin} onChange={(e) => updateParam(p.id, { specMin: e.target.value })} className={inputCls} />
                 <input placeholder="Spec max (optional)" value={p.specMax} onChange={(e) => updateParam(p.id, { specMax: e.target.value })} className={inputCls} />
+              </div>
+              <div className="flex items-center gap-1.5 mt-1.5">
+                <span className="text-[10px] uppercase tracking-wide text-zinc-400">Result</span>
+                {[
+                  { key: "auto", label: "Auto" },
+                  { key: "pass", label: "Pass" },
+                  { key: "fail", label: "Fail" },
+                ].map((o) => (
+                  <button
+                    key={o.key}
+                    onClick={() => updateParam(p.id, { override: o.key })}
+                    className="px-2.5 py-1 rounded-full text-[10px] font-semibold"
+                    style={{
+                      background: p.override === o.key ? accent : "#00000008",
+                      color: p.override === o.key ? "#ffffff" : "#6B7280",
+                    }}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+                {p.override !== "auto" && (
+                  <span className="text-[10px] text-zinc-400">— overrides the spec comparison</span>
+                )}
               </div>
             </div>
           ))}
@@ -2194,6 +2224,9 @@ function LabCard({ test, accent, brandLabel, isBoss, onDelete, onEdit }) {
                       <span className="text-zinc-400 ml-1">(expected {p.specMin != null ? p.specMin : p.specMax})</span>
                     ) : (
                       <span className="text-zinc-400 ml-1">(no spec)</span>
+                    )}
+                    {p.override && (
+                      <span className="ml-1" style={{ color: pColor }}>· manual</span>
                     )}
                   </div>
                 </div>
