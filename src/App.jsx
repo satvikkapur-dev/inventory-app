@@ -93,7 +93,8 @@ function fmtDate(iso) {
 
 // Builds a full, print-ready HTML document for a lab test — opened in a new
 // tab so the user can "Print / Save as PDF" a professional-looking report.
-function buildLabReportHTML(test, brandLabel) {
+function buildLabReportHTML(test, brandLabel, extras = {}) {
+  const { customerName, totalQty, testedBy } = extras;
   const rows = test.parameters
     .map((p) => {
       const spec = p.specMin != null || p.specMax != null
@@ -169,6 +170,8 @@ function buildLabReportHTML(test, brandLabel) {
     ${test.batchNumber ? `<tr><td class="label">Batch No.</td><td class="value">${test.batchNumber}</td></tr>` : ""}
     <tr><td class="label">Product / Sample</td><td class="value">${test.productName}</td></tr>
     <tr><td class="label">Date of Testing</td><td class="value">${test.date}</td></tr>
+    ${customerName ? `<tr><td class="label">Customer</td><td class="value">${customerName}</td></tr>` : ""}
+    ${totalQty ? `<tr><td class="label">Total Quantity</td><td class="value">${totalQty}</td></tr>` : ""}
   </table>
 
   <table class="results">
@@ -185,7 +188,7 @@ function buildLabReportHTML(test, brandLabel) {
   </div>
 
   <div class="sig">
-    <div><div class="line">Tested By — ${test.by}</div></div>
+    <div><div class="line">Tested By — ${testedBy || test.by}</div></div>
     <div><div class="line">Authorized Signatory</div></div>
   </div>
 
@@ -2173,10 +2176,18 @@ function LabForm({ accent, name, editingTest, onSubmit, onClose, hideClose }) {
 
 function LabCard({ test, accent, brandLabel, isBoss, onDelete, onEdit }) {
   const [open, setOpen] = useState(false);
-  const downloadReport = () => {
+  const [reportOptionsOpen, setReportOptionsOpen] = useState(false);
+  const [customerName, setCustomerName] = useState("");
+  const [totalQty, setTotalQty] = useState("");
+  const [testedBy, setTestedBy] = useState(test.by);
+  const generateReport = () => {
     const win = window.open("", "_blank");
     if (!win) return;
-    win.document.write(buildLabReportHTML(test, brandLabel));
+    win.document.write(buildLabReportHTML(test, brandLabel, {
+      customerName: customerName.trim(),
+      totalQty: totalQty.trim(),
+      testedBy: isBoss ? testedBy.trim() : test.by,
+    }));
     win.document.close();
   };
   const overallColor = test.overallPass === true ? "#2E9E5B" : test.overallPass === false ? "#D1453B" : "#8A8F98";
@@ -2238,7 +2249,7 @@ function LabCard({ test, accent, brandLabel, isBoss, onDelete, onEdit }) {
             {test.editedBy && ` · edited by ${test.editedBy} · ${fmtDate(test.editedAt)}`}
           </div>
           <div className="mt-3 flex items-center gap-4">
-            <button onClick={downloadReport} className="flex items-center gap-1.5 text-xs" style={{ color: accent }}>
+            <button onClick={() => setReportOptionsOpen(!reportOptionsOpen)} className="flex items-center gap-1.5 text-xs" style={{ color: accent }}>
               <Download size={12} /> Download report
             </button>
             {isBoss && (
@@ -2252,6 +2263,37 @@ function LabCard({ test, accent, brandLabel, isBoss, onDelete, onEdit }) {
               </button>
             )}
           </div>
+          {reportOptionsOpen && (
+            <div className="mt-3 p-2.5 rounded-lg space-y-2" style={{ background: "#F7F8F9" }}>
+              <div className="text-[10px] uppercase tracking-wide text-zinc-400">Certificate details (not saved)</div>
+              <input
+                placeholder="Customer name (optional)"
+                value={customerName}
+                onChange={(e) => setCustomerName(e.target.value)}
+                className="w-full px-2.5 py-1.5 rounded-lg text-xs border border-zinc-200 bg-white"
+              />
+              <input
+                placeholder="Total quantity (optional)"
+                value={totalQty}
+                onChange={(e) => setTotalQty(e.target.value)}
+                className="w-full px-2.5 py-1.5 rounded-lg text-xs border border-zinc-200 bg-white"
+              />
+              <input
+                placeholder="Tested by"
+                value={isBoss ? testedBy : test.by}
+                onChange={(e) => isBoss && setTestedBy(e.target.value)}
+                disabled={!isBoss}
+                className="w-full px-2.5 py-1.5 rounded-lg text-xs border border-zinc-200 bg-white disabled:opacity-60"
+              />
+              <button
+                onClick={generateReport}
+                className="w-full py-1.5 rounded-lg text-xs font-medium text-white"
+                style={{ background: accent }}
+              >
+                Generate PDF
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
