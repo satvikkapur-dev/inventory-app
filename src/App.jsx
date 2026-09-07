@@ -101,10 +101,12 @@ function buildLabReportHTML(test, brandLabel) {
         : "No spec set";
       const statusClass = p.pass === true ? "pass" : p.pass === false ? "fail" : "neutral";
       const statusLabel = p.pass === true ? "PASS" : p.pass === false ? "FAIL" : "—";
+      const resultDisplay = `${p.result}${typeof p.result === "number" ? (p.unit || "") : ""}`;
       return `
         <tr>
           <td>${p.name}</td>
-          <td class="num">${p.result}${p.unit || ""}</td>
+          <td>${p.testMethod || "–"}</td>
+          <td class="num">${resultDisplay}</td>
           <td class="num">${spec}</td>
           <td class="status ${statusClass}">${statusLabel}</td>
         </tr>`;
@@ -171,7 +173,7 @@ function buildLabReportHTML(test, brandLabel) {
 
   <table class="results">
     <thead>
-      <tr><th>Test Parameter</th><th>Result</th><th>Specification</th><th>Status</th></tr>
+      <tr><th>Test Parameter</th><th>Test Method</th><th>Result</th><th>Specification</th><th>Status</th></tr>
     </thead>
     <tbody>
       ${rows}
@@ -2008,23 +2010,29 @@ function LabForm({ accent, name, onSubmit, onClose, hideClose }) {
   const [batchNumber, setBatchNumber] = useState("");
   const [productName, setProductName] = useState("");
   const [date, setDate] = useState(todayStr());
-  const [params, setParams] = useState([{ id: uid(), name: "", result: "", unit: "", specMin: "", specMax: "" }]);
+  const [params, setParams] = useState([{ id: uid(), name: "", testMethod: "", result: "", unit: "", specMin: "", specMax: "" }]);
 
-  const addParam = () => setParams([...params, { id: uid(), name: "", result: "", unit: "", specMin: "", specMax: "" }]);
+  const addParam = () => setParams([...params, { id: uid(), name: "", testMethod: "", result: "", unit: "", specMin: "", specMax: "" }]);
   const removeParam = (id) => setParams(params.filter((p) => p.id !== id));
   const updateParam = (id, patch) => setParams(params.map((p) => (p.id === id ? { ...p, ...patch } : p)));
 
   const submit = () => {
     if (!testingNumber.trim() || !productName.trim()) return;
     const finalParams = params
-      .filter((p) => p.name.trim() && p.result !== "")
+      .filter((p) => p.name.trim() && p.result.trim() !== "")
       .map((p) => {
-        const result = Number(p.result);
+        const raw = p.result.trim();
+        const numeric = Number(raw);
+        // Some tests (e.g. Appearance) have a qualitative result like "Clear,
+        // colorless liquid" rather than a number — keep those as text and skip
+        // pass/fail, since there's nothing numeric to compare against a spec.
+        const isNumeric = raw !== "" && !isNaN(numeric) && isFinite(numeric);
+        const result = isNumeric ? numeric : raw;
         const min = p.specMin !== "" ? Number(p.specMin) : null;
         const max = p.specMax !== "" ? Number(p.specMax) : null;
-        const hasSpec = min !== null || max !== null;
+        const hasSpec = isNumeric && (min !== null || max !== null);
         const pass = hasSpec ? (min === null || result >= min) && (max === null || result <= max) : null;
-        return { id: p.id, name: p.name.trim(), result, unit: p.unit.trim(), specMin: min, specMax: max, pass };
+        return { id: p.id, name: p.name.trim(), testMethod: p.testMethod.trim(), result, unit: p.unit.trim(), specMin: min, specMax: max, pass };
       });
     if (finalParams.length === 0) return;
     const specced = finalParams.filter((p) => p.pass !== null);
@@ -2071,8 +2079,11 @@ function LabForm({ accent, name, onSubmit, onClose, hideClose }) {
                   </button>
                 )}
               </div>
+              <div className="mb-1.5">
+                <input placeholder="Test method (e.g. ASTM D445, optional)" value={p.testMethod} onChange={(e) => updateParam(p.id, { testMethod: e.target.value })} className={inputCls} />
+              </div>
               <div className="grid grid-cols-2 gap-1.5">
-                <input placeholder="Result" type="number" value={p.result} onChange={(e) => updateParam(p.id, { result: e.target.value })} className={inputCls} />
+                <input placeholder="Result (number or text, e.g. Clear liquid)" value={p.result} onChange={(e) => updateParam(p.id, { result: e.target.value })} className={inputCls} />
                 <input placeholder="Unit (e.g. cP)" value={p.unit} onChange={(e) => updateParam(p.id, { unit: e.target.value })} className={inputCls} />
                 <input placeholder="Spec min" type="number" value={p.specMin} onChange={(e) => updateParam(p.id, { specMin: e.target.value })} className={inputCls} />
                 <input placeholder="Spec max" type="number" value={p.specMax} onChange={(e) => updateParam(p.id, { specMax: e.target.value })} className={inputCls} />
@@ -2130,12 +2141,15 @@ function LabCard({ test, accent, brandLabel, isBoss, onDelete }) {
               const pColor = p.pass === true ? "#2E9E5B" : p.pass === false ? "#D1453B" : "#8A8F98";
               return (
                 <div key={p.id} className="flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-1.5">
-                    {p.pass === true ? <CheckCircle2 size={12} style={{ color: pColor }} /> : p.pass === false ? <XCircle size={12} style={{ color: pColor }} /> : <MinusCircle size={12} style={{ color: pColor }} />}
-                    <span className="text-zinc-700">{p.name}</span>
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    {p.pass === true ? <CheckCircle2 size={12} style={{ color: pColor }} className="shrink-0" /> : p.pass === false ? <XCircle size={12} style={{ color: pColor }} className="shrink-0" /> : <MinusCircle size={12} style={{ color: pColor }} className="shrink-0" />}
+                    <div className="min-w-0">
+                      <div className="text-zinc-700 truncate">{p.name}</div>
+                      {p.testMethod && <div className="text-[10px] text-zinc-400 truncate">{p.testMethod}</div>}
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <span className="mono-font font-semibold" style={{ color: pColor }}>{p.result}{p.unit}</span>
+                  <div className="text-right shrink-0 ml-2">
+                    <span className="mono-font font-semibold" style={{ color: pColor }}>{p.result}{typeof p.result === "number" ? p.unit : ""}</span>
                     {(p.specMin != null || p.specMax != null) ? (
                       <span className="text-zinc-400 ml-1">
                         (spec {p.specMin != null ? p.specMin : "–"}–{p.specMax != null ? p.specMax : "–"})
