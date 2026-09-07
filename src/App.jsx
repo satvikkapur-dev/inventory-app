@@ -120,10 +120,8 @@ function buildLabReportHTML(test, brandLabel) {
   @page { margin: 24mm 18mm; }
   * { box-sizing: border-box; }
   body { font-family: Georgia, 'Times New Roman', serif; color: #1a1a1a; margin: 0; padding: 40px; }
-  .wordmark { font-family: Arial, sans-serif; font-weight: 800; font-size: 22px; letter-spacing: 0.5px; }
-  .wordmark .a { color: #155830; }
-  .wordmark .b { color: #59A249; }
-  .tagline { font-family: Arial, sans-serif; font-size: 10px; color: #666; letter-spacing: 1px; margin-top: 2px; }
+  .logo { height: 110px; display: block; margin-bottom: 12px; }
+  .tagline { font-family: Arial, sans-serif; font-size: 11px; font-weight: 700; color: #155830; letter-spacing: 1.5px; margin-bottom: 14px; }
   .doc-title { font-family: Arial, sans-serif; font-size: 15px; font-weight: 700; letter-spacing: 2px; text-align: center; margin: 36px 0 4px; text-transform: uppercase; color: #155830; }
   .doc-sub { font-family: Arial, sans-serif; font-size: 11px; text-align: center; color: #888; margin-bottom: 32px; letter-spacing: 1px; }
   .rule { border: none; border-top: 2px solid #155830; margin: 0 0 24px; }
@@ -156,8 +154,8 @@ function buildLabReportHTML(test, brandLabel) {
 <body>
   <div class="print-bar"><button onclick="window.print()">Print / Save as PDF</button></div>
 
-  <div class="wordmark"><span class="a">URBN</span><span class="b">FETTCH</span></div>
-  <div class="tagline">A UNIT OF SANIL CHEMICALS &nbsp;·&nbsp; ${brandLabel.toUpperCase()}</div>
+  <img class="logo" src="${window.location.origin}/logo-urbnfettch.png" alt="URBNFETTCH — a unit of Sanil Chemicals" />
+  <div class="tagline">${brandLabel.toUpperCase()}</div>
 
   <hr class="rule" />
 
@@ -228,10 +226,8 @@ function buildItemsReportHTML(items, brandLabel, filterLabel, canViewCosting) {
   @page { margin: 24mm 18mm; }
   * { box-sizing: border-box; }
   body { font-family: Georgia, 'Times New Roman', serif; color: #1a1a1a; margin: 0; padding: 40px; }
-  .wordmark { font-family: Arial, sans-serif; font-weight: 800; font-size: 22px; letter-spacing: 0.5px; }
-  .wordmark .a { color: #155830; }
-  .wordmark .b { color: #59A249; }
-  .tagline { font-family: Arial, sans-serif; font-size: 10px; color: #666; letter-spacing: 1px; margin-top: 2px; }
+  .logo { height: 110px; display: block; margin-bottom: 12px; }
+  .tagline { font-family: Arial, sans-serif; font-size: 11px; font-weight: 700; color: #155830; letter-spacing: 1.5px; margin-bottom: 14px; }
   .doc-title { font-family: Arial, sans-serif; font-size: 15px; font-weight: 700; letter-spacing: 2px; text-align: center; margin: 36px 0 4px; text-transform: uppercase; color: #155830; }
   .doc-sub { font-family: Arial, sans-serif; font-size: 11px; text-align: center; color: #888; margin-bottom: 32px; letter-spacing: 1px; }
   .rule { border: none; border-top: 2px solid #155830; margin: 0 0 24px; }
@@ -259,8 +255,8 @@ function buildItemsReportHTML(items, brandLabel, filterLabel, canViewCosting) {
 <body>
   <div class="print-bar"><button onclick="window.print()">Print / Save as PDF</button></div>
 
-  <div class="wordmark"><span class="a">URBN</span><span class="b">FETTCH</span></div>
-  <div class="tagline">A UNIT OF SANIL CHEMICALS &nbsp;·&nbsp; ${brandLabel.toUpperCase()}</div>
+  <img class="logo" src="${window.location.origin}/logo-urbnfettch.png" alt="URBNFETTCH — a unit of Sanil Chemicals" />
+  <div class="tagline">${brandLabel.toUpperCase()}</div>
 
   <hr class="rule" />
 
