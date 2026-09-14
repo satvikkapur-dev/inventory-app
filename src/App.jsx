@@ -92,6 +92,27 @@ function fmtDate(iso) {
     d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }
 
+// Normalizes a product/item name for matching: trims, lowercases, and
+// collapses any run of internal whitespace to a single space, so
+// "Antitack AT-30" and "Antitack  AT-30" (extra space) match as the same
+// product instead of silently becoming two different stock lines.
+function normName(s) {
+  return (s || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+// Rounds a stock/production quantity to 2 decimal places to stop floating
+// point arithmetic (repeated add/subtract across sales, production,
+// samples) from drifting numbers out to long decimal tails.
+function round2(n) {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+
+// Formats a quantity for display: rounds to 2dp and strips trailing zeros
+// (150 stays "150", 0.5 stays "0.5", 149.999999999997 shows as "150").
+function fmtQty(n) {
+  return round2(n).toString();
+}
+
 // Compact ₹ formatting for chart axes (₹1.2L, ₹45k) so labels stay narrow
 // enough not to get clipped against the card edge.
 function compactINR(n) {
@@ -226,7 +247,7 @@ function buildItemsReportHTML(items, brandLabel, filterLabel, canViewCosting) {
         <tr>
           <td>${i.name}</td>
           <td>${i.category}</td>
-          <td class="num">${i.qty}${i.unit}</td>
+          <td class="num">${fmtQty(i.qty)}${i.unit}</td>
           <td class="num">${i.threshold}${i.unit}</td>
           <td class="status ${low ? "fail" : "pass"}">${low ? "LOW STOCK" : "OK"}</td>
           <td>${i.supplier?.name || "–"}</td>
@@ -338,11 +359,11 @@ function consumeLotsFIFO(lots, qtyNeeded) {
       remaining -= lot.qty;
     } else {
       cost += remaining * lot.price;
-      newLots.push({ ...lot, qty: lot.qty - remaining });
+      newLots.push({ ...lot, qty: round2(lot.qty - remaining) });
       remaining = 0;
     }
   }
-  return { cost, remainingLots: newLots, shortfall: Math.max(0, remaining) };
+  return { cost, remainingLots: newLots, shortfall: round2(Math.max(0, remaining)) };
 }
 
 function consumeMaterial(item, qtyNeeded) {
@@ -351,7 +372,7 @@ function consumeMaterial(item, qtyNeeded) {
     const consumedQty = qtyNeeded - shortfall;
     return {
       cost,
-      newQty: Math.max(0, item.qty - consumedQty),
+      newQty: round2(Math.max(0, item.qty - consumedQty)),
       newLots: remainingLots,
       unitCostUsed: consumedQty > 0 ? cost / consumedQty : 0,
     };
@@ -359,7 +380,7 @@ function consumeMaterial(item, qtyNeeded) {
   const cpu = item.costPerUnit || 0;
   return {
     cost: qtyNeeded * cpu,
-    newQty: Math.max(0, item.qty - qtyNeeded),
+    newQty: round2(Math.max(0, item.qty - qtyNeeded)),
     newLots: item.lots || [],
     unitCostUsed: cpu,
   };
@@ -367,7 +388,7 @@ function consumeMaterial(item, qtyNeeded) {
 
 function addStockInLot(item, qty, price) {
   if (item.category !== "Raw material") {
-    return { qty: item.qty + qty, lots: item.lots || null };
+    return { qty: round2(item.qty + qty), lots: item.lots || null };
   }
   const hasLots = item.lots && item.lots.length > 0;
 
@@ -376,7 +397,7 @@ function addStockInLot(item, qty, price) {
   // existing untracked quantity, since consumers derive qty from lots
   // once any exist.)
   if (!hasLots && !price) {
-    return { qty: item.qty + qty, lots: item.lots || null };
+    return { qty: round2(item.qty + qty), lots: item.lots || null };
   }
 
   let lots = item.lots ? [...item.lots] : [];
@@ -391,10 +412,10 @@ function addStockInLot(item, qty, price) {
     lots.push({ id: uid(), qty, price: Number(price), date: new Date().toISOString() });
   } else {
     const last = { ...lots[lots.length - 1] };
-    last.qty += qty;
+    last.qty = round2(last.qty + qty);
     lots[lots.length - 1] = last;
   }
-  const newQty = lots.reduce((s, l) => s + l.qty, 0);
+  const newQty = round2(lots.reduce((s, l) => s + l.qty, 0));
   return { qty: newQty, lots };
 }
 
@@ -477,7 +498,7 @@ function applyBatchStock(batch, items, sharedItems, actorName) {
   };
 
   const existingFG = nextItems.find(
-    (i) => i.category === "Finished good" && i.name.trim().toLowerCase() === batch.productName.trim().toLowerCase()
+    (i) => i.category === "Finished good" && normName(i.name) === normName(batch.productName)
   );
 
   if (existingFG) {
@@ -485,7 +506,7 @@ function applyBatchStock(batch, items, sharedItems, actorName) {
       i.id === existingFG.id
         ? {
             ...i,
-            qty: i.qty + batch.outputQty,
+            qty: round2(i.qty + batch.outputQty),
             history: [
               { id: uid(), type: "in", qty: batch.outputQty, date: new Date().toISOString(), note: `Produced — batch ${batch.batchNumber}`, by: actorName },
               ...i.history,
@@ -548,13 +569,13 @@ function reverseBatchStock(batch, items, sharedItems, actorName) {
   if (batch.containerUsed) restoreConsumed(batch.containerUsed.itemId, batch.containerUsed.unitsUsed, batch.containerUsed.unitCostUsed);
 
   const fgIdx = nextItems.findIndex(
-    (i) => i.category === "Finished good" && i.name.trim().toLowerCase() === batch.productName.trim().toLowerCase()
+    (i) => i.category === "Finished good" && normName(i.name) === normName(batch.productName)
   );
   if (fgIdx >= 0) {
     const fg = nextItems[fgIdx];
     nextItems[fgIdx] = {
       ...fg,
-      qty: Math.max(0, fg.qty - batch.outputQty),
+      qty: round2(Math.max(0, fg.qty - batch.outputQty)),
       history: [
         { id: uid(), type: "out", qty: batch.outputQty, date: new Date().toISOString(), note: `Reversed — batch ${batch.batchNumber}`, by: actorName },
         ...fg.history,
@@ -1133,7 +1154,7 @@ function MovementRow({ h, showItem, canViewCosting }) {
         </div>
       </div>
       <span className="mono-font text-xs shrink-0" style={{ color }}>
-        {h.type === "out" ? "−" : "+"}{h.qty}
+        {h.type === "out" ? "−" : "+"}{fmtQty(h.qty)}
       </span>
     </div>
   );
@@ -1236,7 +1257,7 @@ function ItemCard({ item, accent, name, isBoss, canViewCosting, canEnterPrice, o
           </div>
         </div>
         <span className="mono-font text-xs shrink-0" style={{ color: low ? "#D1453B" : "#27292E" }}>
-          {item.qty}{item.unit}
+          {fmtQty(item.qty)}{item.unit}
         </span>
         {open ? <ChevronUp size={16} className="text-zinc-400" /> : <ChevronDown size={16} className="text-zinc-400" />}
       </button>
@@ -1263,7 +1284,7 @@ function ItemCard({ item, accent, name, isBoss, canViewCosting, canEnterPrice, o
               <div className="space-y-1">
                 {item.lots.map((l) => (
                   <div key={l.id} className="flex justify-between text-xs text-zinc-600">
-                    <span>{l.qty}{item.unit}</span>
+                    <span>{fmtQty(l.qty)}{item.unit}</span>
                     <span className="mono-font">₹{l.price}/{item.unit}</span>
                   </div>
                 ))}
@@ -1446,7 +1467,7 @@ function BulkImportForm({ accent, name, onImport, onClose }) {
   );
 }
 
-function ProductionForm({ accent, name, rawMaterials, containers, editingBatch, onSubmit, onClose }) {
+function ProductionForm({ accent, name, rawMaterials, containers, finishedGoods, batches, editingBatch, onSubmit, onClose }) {
   const [productName, setProductName] = useState(editingBatch?.productName || "");
   const [batchNumber, setBatchNumber] = useState(editingBatch?.batchNumber || "");
   const [date, setDate] = useState(editingBatch?.date || todayStr());
@@ -1459,6 +1480,7 @@ function ProductionForm({ accent, name, rawMaterials, containers, editingBatch, 
       ? editingBatch.materials.map((m) => ({ id: uid(), itemId: m.itemId, qty: String(m.qty) }))
       : [{ id: uid(), itemId: "", qty: "" }]
   );
+  const [copiedFrom, setCopiedFrom] = useState(null);
 
   const addRow = () => setRows([...rows, { id: uid(), itemId: "", qty: "" }]);
   const removeRow = (id) => setRows(rows.filter((r) => r.id !== id));
@@ -1466,6 +1488,48 @@ function ProductionForm({ accent, name, rawMaterials, containers, editingBatch, 
 
   const selectedContainer = containers.find((c) => c.id === containerId);
   const unitsNeeded = selectedContainer && outputQty ? Math.ceil(Number(outputQty) / selectedContainer.capacityKg) : 0;
+
+  // Suggests existing product names (finished goods + past batches) so
+  // retyping doesn't introduce spacing/casing variants of the same product.
+  const productNameOptions = useMemo(() => {
+    const seen = new Map();
+    (finishedGoods || []).forEach((i) => {
+      const k = normName(i.name);
+      if (!seen.has(k)) seen.set(k, i.name);
+    });
+    (batches || []).forEach((b) => {
+      const k = normName(b.productName);
+      if (!seen.has(k)) seen.set(k, b.productName);
+    });
+    return Array.from(seen.values()).sort((a, b) => a.localeCompare(b));
+  }, [finishedGoods, batches]);
+
+  // The most recent past batch of the exact same product (by normalized
+  // name), regardless of what was produced in between — used to offer a
+  // one-tap prefill instead of rebuilding the whole form from memory.
+  const lastMatchingBatch = useMemo(() => {
+    if (editingBatch) return null;
+    const key = normName(productName);
+    if (!key) return null;
+    const matches = (batches || [])
+      .filter((b) => normName(b.productName) === key)
+      .sort((a, b) => new Date(b.createdAt || b.date) - new Date(a.createdAt || a.date));
+    return matches[0] || null;
+  }, [productName, batches, editingBatch]);
+
+  const copyLastBatch = () => {
+    if (!lastMatchingBatch) return;
+    setMachineNumber(lastMatchingBatch.machineNumber || "");
+    setOutputQty(String(lastMatchingBatch.outputQty));
+    setOutputUnit(lastMatchingBatch.outputUnit || "kg");
+    setContainerId(lastMatchingBatch.containerUsed?.itemId || "");
+    setRows(
+      lastMatchingBatch.materials.length > 0
+        ? lastMatchingBatch.materials.map((m) => ({ id: uid(), itemId: m.itemId, qty: String(m.qty) }))
+        : [{ id: uid(), itemId: "", qty: "" }]
+    );
+    setCopiedFrom(lastMatchingBatch);
+  };
 
   const submit = () => {
     if (!productName.trim() || !batchNumber.trim() || !outputQty) return;
@@ -1480,7 +1544,7 @@ function ProductionForm({ accent, name, rawMaterials, containers, editingBatch, 
 
     onSubmit({
       id: editingBatch ? editingBatch.id : uid(),
-      productName: productName.trim(),
+      productName: productName.trim().replace(/\s+/g, " "),
       batchNumber: batchNumber.trim(),
       date,
       machineNumber: machineNumber.trim(),
@@ -1502,7 +1566,32 @@ function ProductionForm({ accent, name, rawMaterials, containers, editingBatch, 
       </div>
 
       <div className="grid grid-cols-2 gap-2">
-        <div className="col-span-2"><input placeholder="Product name" value={productName} onChange={(e) => setProductName(e.target.value)} className={inputCls} /></div>
+        <div className="col-span-2">
+          <input
+            placeholder="Product name"
+            value={productName}
+            onChange={(e) => { setProductName(e.target.value); setCopiedFrom(null); }}
+            list="production-product-names"
+            className={inputCls}
+          />
+          <datalist id="production-product-names">
+            {productNameOptions.map((n) => <option key={n} value={n} />)}
+          </datalist>
+          {lastMatchingBatch && !copiedFrom && (
+            <button
+              onClick={copyLastBatch}
+              className="mt-1.5 flex items-center gap-1.5 text-[11px]"
+              style={{ color: accent }}
+            >
+              <RotateCcw size={11} /> Copy last {productName.trim()} batch (#{lastMatchingBatch.batchNumber} · {lastMatchingBatch.date})
+            </button>
+          )}
+          {copiedFrom && (
+            <div className="mt-1.5 text-[11px] text-zinc-500">
+              Copied from batch #{copiedFrom.batchNumber} ({copiedFrom.date}) — adjust as needed.
+            </div>
+          )}
+        </div>
         <input placeholder="Batch number" value={batchNumber} onChange={(e) => setBatchNumber(e.target.value)} className={inputCls} />
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} />
         <input placeholder="Machine number" value={machineNumber} onChange={(e) => setMachineNumber(e.target.value)} className={inputCls} />
@@ -1516,7 +1605,7 @@ function ProductionForm({ accent, name, rawMaterials, containers, editingBatch, 
           <select value={containerId} onChange={(e) => setContainerId(e.target.value)} className={inputCls}>
             <option value="">No container / not applicable</option>
             {containers.map((c) => (
-              <option key={c.id} value={c.id}>{c.name} ({c.capacityKg}kg/unit · {c.qty} available)</option>
+              <option key={c.id} value={c.id}>{c.name} ({c.capacityKg}kg/unit · {fmtQty(c.qty)} available)</option>
             ))}
           </select>
           {containers.length === 0 && (
@@ -1524,7 +1613,7 @@ function ProductionForm({ accent, name, rawMaterials, containers, editingBatch, 
           )}
           {selectedContainer && outputQty && (
             <p className="text-[10px] text-zinc-500 mt-1">
-              Will deduct {unitsNeeded} unit{unitsNeeded !== 1 ? "s" : ""} of {selectedContainer.name} ({selectedContainer.qty} in stock).
+              Will deduct {unitsNeeded} unit{unitsNeeded !== 1 ? "s" : ""} of {selectedContainer.name} ({fmtQty(selectedContainer.qty)} in stock).
             </p>
           )}
         </div>
@@ -1547,7 +1636,7 @@ function ProductionForm({ accent, name, rawMaterials, containers, editingBatch, 
                 >
                   <option value="">Select material…</option>
                   {rawMaterials.map((m) => (
-                    <option key={m.id} value={m.id}>{m.name} ({m.qty}{m.unit} available)</option>
+                    <option key={m.id} value={m.id}>{m.name} ({fmtQty(m.qty)}{m.unit} available)</option>
                   ))}
                 </select>
                 <input
@@ -1637,7 +1726,7 @@ function ProductionCard({ batch, accent, isBoss, canViewCosting, canEditProducti
                     <span className="text-zinc-400"> (₹{m.unitCostUsed.toFixed(2)}/{m.unit})</span>
                   )}
                 </span>
-                <span className="mono-font" style={{ color: "#D1453B" }}>−{m.qty}{m.unit}</span>
+                <span className="mono-font" style={{ color: "#D1453B" }}>−{fmtQty(m.qty)}{m.unit}</span>
               </div>
             ))}
             {batch.containerUsed && (
@@ -1773,7 +1862,7 @@ function SalesForm({ accent, name, finishedGoods, onSubmit, onClose }) {
           <select value={productId} onChange={(e) => setProductId(e.target.value)} className={inputCls}>
             <option value="">Select product…</option>
             {finishedGoods.map((p) => (
-              <option key={p.id} value={p.id}>{p.name} ({p.qty}{p.unit} available)</option>
+              <option key={p.id} value={p.id}>{p.name} ({fmtQty(p.qty)}{p.unit} available)</option>
             ))}
           </select>
         </div>
@@ -1830,7 +1919,7 @@ function SampleIssueForm({ accent, name, finishedGoods, onSubmit, onClose }) {
           <select value={productId} onChange={(e) => setProductId(e.target.value)} className={inputCls}>
             <option value="">Select product…</option>
             {finishedGoods.map((p) => (
-              <option key={p.id} value={p.id}>{p.name} ({p.qty}{p.unit} available)</option>
+              <option key={p.id} value={p.id}>{p.name} ({fmtQty(p.qty)}{p.unit} available)</option>
             ))}
           </select>
         </div>
@@ -1856,7 +1945,7 @@ function SalesCard({ sale, accent, isBoss, onDelete }) {
         {isSample ? <FlaskConical size={18} style={{ color: accent }} className="shrink-0" /> : <ShoppingCart size={18} style={{ color: accent }} className="shrink-0" />}
         <div className="min-w-0 flex-1">
           <div className="text-sm font-medium text-zinc-900 truncate">{sale.customerName}</div>
-          <div className="text-xs text-zinc-500 mt-0.5 truncate">{sale.productName} · {sale.qty}{sale.unit} · {sale.date}</div>
+          <div className="text-xs text-zinc-500 mt-0.5 truncate">{sale.productName} · {fmtQty(sale.qty)}{sale.unit} · {sale.date}</div>
         </div>
         {isSample ? (
           <span className="text-[10px] font-semibold px-2 py-1 rounded-full shrink-0" style={{ background: `${accent}18`, color: accent }}>SAMPLE</span>
@@ -1869,7 +1958,7 @@ function SalesCard({ sale, accent, isBoss, onDelete }) {
         <div className="px-3.5 pb-3.5" style={{ borderTop: "1px solid #00000010" }}>
           <div className="mt-3 space-y-1 text-xs text-zinc-600">
             {!isSample && <div className="flex justify-between"><span>Price per {sale.unit}</span><span className="mono-font">₹{sale.pricePerUnit}</span></div>}
-            <div className="flex justify-between"><span>Quantity</span><span className="mono-font">{sale.qty}{sale.unit}</span></div>
+            <div className="flex justify-between"><span>Quantity</span><span className="mono-font">{fmtQty(sale.qty)}{sale.unit}</span></div>
             {!isSample && (
               <div className="flex justify-between font-semibold text-zinc-800 pt-1" style={{ borderTop: "1px solid #00000010" }}>
                 <span>Total</span><span className="mono-font">₹{sale.totalAmount.toFixed(2)}</span>
@@ -2003,7 +2092,7 @@ function OrderCard({ order, accent, isBoss, onUpdateStatus, onDelete }) {
   const dLeft = daysUntil(order.dueDate);
   const overdue = dLeft != null && dLeft < 0 && order.status !== "completed";
   const items = getOrderItems(order);
-  const summary = items.map((it) => `${it.productName} ×${it.qty}${it.unit}`).join(", ");
+  const summary = items.map((it) => `${it.productName} ×${fmtQty(it.qty)}${it.unit}`).join(", ");
 
   return (
     <div className="rounded-xl overflow-hidden" style={{ background: "#FFFFFF", border: `1px solid ${overdue ? "#D1453B55" : "#00000014"}` }}>
@@ -2041,7 +2130,7 @@ function OrderCard({ order, accent, isBoss, onUpdateStatus, onDelete }) {
             {items.map((it, i) => (
               <div key={it.id || i} className="flex items-center justify-between text-xs text-zinc-600">
                 <span>{it.productName}</span>
-                <span className="mono-font">{it.qty}{it.unit}</span>
+                <span className="mono-font">{fmtQty(it.qty)}{it.unit}</span>
               </div>
             ))}
           </div>
@@ -2522,7 +2611,7 @@ function SampleCard({ sample, accent, isBoss, onUpdateStatus, onLogUsage, onDele
                   <span className="text-zinc-600 truncate">
                     {h.type === "issued" ? `Issued to ${h.note || "someone"}` : h.note || "Used"}
                   </span>
-                  <span className="mono-font shrink-0 ml-2" style={{ color: "#D1453B" }}>−{h.qty}{sample.unit}</span>
+                  <span className="mono-font shrink-0 ml-2" style={{ color: "#D1453B" }}>−{fmtQty(h.qty)}{sample.unit}</span>
                 </div>
               ))}
             </div>
@@ -2581,18 +2670,27 @@ function Dashboard({ meta, items, batches, sales, canViewCosting }) {
 
   const totalRevenue = sales.reduce((s, x) => s + (x.totalAmount || 0), 0);
   const totalUnitsSold = sales.reduce((s, x) => s + (x.qty || 0), 0);
+  // Group by normalized name so name-typo variants ("Antitack AT-30" vs
+  // "Antitack  AT-30") don't split into separate chart entries, while
+  // still showing a clean display label (the first-seen spelling).
+  const productLabelByKey = {};
+  const labelFor = (key, raw) => (productLabelByKey[key] = productLabelByKey[key] || (raw || "").trim());
+  const withLabels = (chart) => chart.map((e) => ({ ...e, name: productLabelByKey[e.name] || e.name }));
+
   const revenueByProduct = {};
   sales.forEach((x) => {
-    revenueByProduct[x.productName] = (revenueByProduct[x.productName] || 0) + x.totalAmount;
+    const key = normName(x.productName);
+    labelFor(key, x.productName);
+    revenueByProduct[key] = (revenueByProduct[key] || 0) + x.totalAmount;
   });
-  const topProductsChart = topNWithOther(revenueByProduct);
+  const topProductsChart = withLabels(topNWithOther(revenueByProduct));
 
   // Blended cost/kg per product, from all logged production batches for
   // that product — used to estimate profit on each sale of it.
   const costTotalsByProduct = {};
   batches.forEach((b) => {
     if (!b.productName) return;
-    const key = b.productName.trim().toLowerCase();
+    const key = normName(b.productName);
     if (!costTotalsByProduct[key]) costTotalsByProduct[key] = { cost: 0, qty: 0 };
     costTotalsByProduct[key].cost += b.costing?.totalCost || 0;
     costTotalsByProduct[key].qty += b.outputQty || 0;
@@ -2606,16 +2704,16 @@ function Dashboard({ meta, items, batches, sales, canViewCosting }) {
   let costDataMissing = false;
   const profitByProduct = {};
   sales.forEach((x) => {
-    const key = (x.productName || "").trim().toLowerCase();
+    const key = normName(x.productName);
     const costPerKg = costPerKgByProduct[key];
     if (costPerKg == null) costDataMissing = true;
     const cost = (costPerKg || 0) * x.qty;
     totalCost += cost;
-    profitByProduct[x.productName] = (profitByProduct[x.productName] || 0) + (x.totalAmount - cost);
+    profitByProduct[key] = (profitByProduct[key] || 0) + (x.totalAmount - cost);
   });
   const totalProfit = totalRevenue - totalCost;
   const margin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0;
-  const profitProductChart = topNWithOther(profitByProduct);
+  const profitProductChart = withLabels(topNWithOther(profitByProduct));
   const activeChart = profitView === "revenue" ? topProductsChart : profitProductChart;
   const activeLabel = profitView === "revenue" ? "Revenue" : "Profit";
 
@@ -2669,7 +2767,7 @@ function Dashboard({ meta, items, batches, sales, canViewCosting }) {
             {lowStockItems.slice(0, 4).map((i) => (
               <div key={i.id} className="flex justify-between text-xs text-zinc-600 py-0.5">
                 <span>{i.name}</span>
-                <span className="mono-font" style={{ color: "#D1453B" }}>{i.qty}{i.unit}</span>
+                <span className="mono-font" style={{ color: "#D1453B" }}>{fmtQty(i.qty)}{i.unit}</span>
               </div>
             ))}
           </div>
@@ -2848,7 +2946,7 @@ function ProductionPlanning({ accent, orders, items, isBoss, onUpdateStatus, onD
   const groups = {};
   active.forEach((o) => {
     getOrderItems(o).forEach((item) => {
-      const key = item.productName.trim().toLowerCase();
+      const key = normName(item.productName);
       if (!groups[key]) groups[key] = { productName: item.productName, unit: item.unit, totalQty: 0, dueDate: null, orders: [] };
       groups[key].totalQty += item.qty;
       if (!groups[key].orders.some((x) => x.id === o.id)) groups[key].orders.push(o);
@@ -2858,7 +2956,7 @@ function ProductionPlanning({ accent, orders, items, isBoss, onUpdateStatus, onD
 
   const rows = Object.values(groups).map((g) => {
     const stockItem = items.find(
-      (i) => i.category === "Finished good" && i.name.trim().toLowerCase() === g.productName.trim().toLowerCase()
+      (i) => i.category === "Finished good" && normName(i.name) === normName(g.productName)
     );
     const available = stockItem ? stockItem.qty : 0;
     const shortfall = Math.max(0, g.totalQty - available);
@@ -3266,7 +3364,7 @@ function AuthenticatedApp() {
 
     const applyDeduction = (product) => ({
       ...product,
-      qty: Math.max(0, product.qty - sale.qty),
+      qty: round2(Math.max(0, product.qty - sale.qty)),
       history: [
         { id: uid(), type: "out", qty: sale.qty, date: new Date().toISOString(), note: sale.type === "sample" ? `Sample issued to ${sale.customerName}` : `Sold to ${sale.customerName}`, by: sale.by },
         ...product.history,
@@ -3359,7 +3457,7 @@ function AuthenticatedApp() {
         const remaining = s.qtyRemaining != null ? s.qtyRemaining : s.qtyReceived;
         return {
           ...s,
-          qtyRemaining: Math.max(0, remaining - qty),
+          qtyRemaining: round2(Math.max(0, remaining - qty)),
           history: [
             { id: uid(), qty, note, type, date: new Date().toISOString(), by: session.name },
             ...(s.history || []),
@@ -3603,6 +3701,8 @@ function AuthenticatedApp() {
                 name={session.name}
                 rawMaterials={rawMaterials}
                 containers={containers}
+                finishedGoods={finishedGoods}
+                batches={batches}
                 editingBatch={editingBatch}
                 onClose={() => { setShowProdForm(false); setEditingBatch(null); }}
                 onSubmit={editingBatch ? updateBatch : logProduction}
