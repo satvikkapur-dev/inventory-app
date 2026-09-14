@@ -63,7 +63,7 @@ const USERS = [
   { name: "SCPL", pin: "8941", role: "staff", canViewCosting: true },
   { name: "Vijay", pin: "2314", role: "staff", canViewCosting: false },
   { name: "Jyoti", pin: "3214", role: "staff", canViewCosting: false },
-  { name: "Angad", pin: "4512", role: "staff", canViewCosting: false, canEnterPrice: true, canLogSamples: true, canEditProduction: true },
+  { name: "Angad", pin: "4512", role: "staff", canViewCosting: false, canEnterPrice: true, canLogSamples: true, canEditProduction: true, canIssueSample: true },
   { name: "Mohit", pin: "4213", role: "lab", canViewCosting: false },
   { name: "Kishore", pin: "9876", role: "homecare_orders", canViewCosting: false },
 ];
@@ -1778,27 +1778,90 @@ function SalesForm({ accent, name, finishedGoods, onSubmit, onClose }) {
   );
 }
 
+function SampleIssueForm({ accent, name, finishedGoods, onSubmit, onClose }) {
+  const [recipient, setRecipient] = useState("");
+  const [productId, setProductId] = useState("");
+  const [qty, setQty] = useState("");
+  const [date, setDate] = useState(todayStr());
+
+  const submit = () => {
+    const product = finishedGoods.find((p) => p.id === productId);
+    if (!recipient.trim() || !product || !qty) return;
+    const q = Number(qty);
+    onSubmit({
+      id: uid(),
+      type: "sample",
+      customerName: recipient.trim(),
+      productId: product.id,
+      productName: product.name,
+      qty: q,
+      unit: product.unit,
+      pricePerUnit: 0,
+      totalAmount: 0,
+      date,
+      by: name,
+      createdAt: new Date().toISOString(),
+    });
+    onClose();
+  };
+
+  return (
+    <div className="rounded-xl p-4 mb-3" style={{ background: "#F3F5F4", border: "1px solid #00000012" }}>
+      <div className="flex justify-between items-center mb-3">
+        <span className="text-sm font-semibold tracking-wide" style={{ color: accent }}>ISSUE SAMPLE</span>
+        <button onClick={onClose} aria-label="Close form"><X size={16} className="text-zinc-400" /></button>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div className="col-span-2"><input placeholder="Given to (customer / purpose)" value={recipient} onChange={(e) => setRecipient(e.target.value)} className={inputCls} /></div>
+        <div className="col-span-2">
+          <select value={productId} onChange={(e) => setProductId(e.target.value)} className={inputCls}>
+            <option value="">Select product…</option>
+            {finishedGoods.map((p) => (
+              <option key={p.id} value={p.id}>{p.name} ({p.qty}{p.unit} available)</option>
+            ))}
+          </select>
+        </div>
+        {finishedGoods.length === 0 && (
+          <p className="col-span-2 text-xs text-zinc-500">No finished goods yet — log a production batch first.</p>
+        )}
+        <div className="col-span-2"><input placeholder="Sample qty (e.g. 0.5 for 500g, if unit is kg)" type="number" value={qty} onChange={(e) => setQty(e.target.value)} className={inputCls} /></div>
+        <div className="col-span-2"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} /></div>
+      </div>
+      <button onClick={submit} className="mt-3 w-full rounded-lg py-2 text-sm font-semibold" style={{ background: accent, color: "#ffffff" }}>
+        Issue sample &amp; deduct stock
+      </button>
+    </div>
+  );
+}
+
 function SalesCard({ sale, accent, isBoss, onDelete }) {
   const [open, setOpen] = useState(false);
+  const isSample = sale.type === "sample";
   return (
     <div className="rounded-xl overflow-hidden" style={{ background: "#FFFFFF", border: "1px solid #00000014" }}>
       <button className="w-full px-3.5 py-3 flex items-center gap-3 text-left" onClick={() => setOpen(!open)}>
-        <ShoppingCart size={18} style={{ color: accent }} className="shrink-0" />
+        {isSample ? <FlaskConical size={18} style={{ color: accent }} className="shrink-0" /> : <ShoppingCart size={18} style={{ color: accent }} className="shrink-0" />}
         <div className="min-w-0 flex-1">
           <div className="text-sm font-medium text-zinc-900 truncate">{sale.customerName}</div>
           <div className="text-xs text-zinc-500 mt-0.5 truncate">{sale.productName} · {sale.qty}{sale.unit} · {sale.date}</div>
         </div>
-        <span className="mono-font text-xs shrink-0 text-zinc-700">₹{sale.totalAmount.toFixed(0)}</span>
+        {isSample ? (
+          <span className="text-[10px] font-semibold px-2 py-1 rounded-full shrink-0" style={{ background: `${accent}18`, color: accent }}>SAMPLE</span>
+        ) : (
+          <span className="mono-font text-xs shrink-0 text-zinc-700">₹{sale.totalAmount.toFixed(0)}</span>
+        )}
         {open ? <ChevronUp size={16} className="text-zinc-400" /> : <ChevronDown size={16} className="text-zinc-400" />}
       </button>
       {open && (
         <div className="px-3.5 pb-3.5" style={{ borderTop: "1px solid #00000010" }}>
           <div className="mt-3 space-y-1 text-xs text-zinc-600">
-            <div className="flex justify-between"><span>Price per {sale.unit}</span><span className="mono-font">₹{sale.pricePerUnit}</span></div>
+            {!isSample && <div className="flex justify-between"><span>Price per {sale.unit}</span><span className="mono-font">₹{sale.pricePerUnit}</span></div>}
             <div className="flex justify-between"><span>Quantity</span><span className="mono-font">{sale.qty}{sale.unit}</span></div>
-            <div className="flex justify-between font-semibold text-zinc-800 pt-1" style={{ borderTop: "1px solid #00000010" }}>
-              <span>Total</span><span className="mono-font">₹{sale.totalAmount.toFixed(2)}</span>
-            </div>
+            {!isSample && (
+              <div className="flex justify-between font-semibold text-zinc-800 pt-1" style={{ borderTop: "1px solid #00000010" }}>
+                <span>Total</span><span className="mono-font">₹{sale.totalAmount.toFixed(2)}</span>
+              </div>
+            )}
           </div>
           <div className="text-[10px] text-zinc-400 flex items-center gap-1 mt-3">
             <User size={9} /> Logged by {sale.by} · {fmtDate(sale.createdAt)}
@@ -2863,6 +2926,7 @@ function AuthenticatedApp() {
   const [showProdForm, setShowProdForm] = useState(false);
   const [editingBatch, setEditingBatch] = useState(null);
   const [showSalesForm, setShowSalesForm] = useState(false);
+  const [showSampleIssueForm, setShowSampleIssueForm] = useState(false);
   const [showLabForm, setShowLabForm] = useState(false);
   const [editingTest, setEditingTest] = useState(null);
   const [showSampleForm, setShowSampleForm] = useState(false);
@@ -2884,6 +2948,7 @@ function AuthenticatedApp() {
   const canViewCosting = !!session?.canViewCosting;
   const canEnterPrice = canViewCosting || !!session?.canEnterPrice;
   const canEditProduction = isBoss || !!session?.canEditProduction;
+  const canIssueSample = isBoss || !!session?.canIssueSample;
   const isLabOnly = session?.role === "lab";
   const isHomecareOrdersOnly = session?.role === "homecare_orders";
   const canSeeLabTab = canViewCosting || isLabOnly;
@@ -2900,7 +2965,7 @@ function AuthenticatedApp() {
   }, [session]);
 
   const handleLogin = (user) => {
-    saveSession({ name: user.name, role: user.role, canViewCosting: !!user.canViewCosting, canEnterPrice: !!user.canEnterPrice, canLogSamples: !!user.canLogSamples, canEditProduction: !!user.canEditProduction });
+    saveSession({ name: user.name, role: user.role, canViewCosting: !!user.canViewCosting, canEnterPrice: !!user.canEnterPrice, canLogSamples: !!user.canLogSamples, canEditProduction: !!user.canEditProduction, canIssueSample: !!user.canIssueSample });
     record(user.name, user.role);
   };
 
@@ -3032,7 +3097,7 @@ function AuthenticatedApp() {
       ...product,
       qty: Math.max(0, product.qty - sale.qty),
       history: [
-        { id: uid(), type: "out", qty: sale.qty, date: new Date().toISOString(), note: `Sold to ${sale.customerName}`, by: sale.by },
+        { id: uid(), type: "out", qty: sale.qty, date: new Date().toISOString(), note: sale.type === "sample" ? `Sample issued to ${sale.customerName}` : `Sold to ${sale.customerName}`, by: sale.by },
         ...product.history,
       ],
     });
@@ -3330,6 +3395,16 @@ function AuthenticatedApp() {
           </>
         ) : tab === "sales" ? (
           <>
+            {canIssueSample && (
+              <div className="flex justify-end mb-3">
+                <button
+                  onClick={() => { setShowSalesForm(false); setShowSampleIssueForm(true); }}
+                  className="flex items-center gap-1 text-[11px] text-zinc-500"
+                >
+                  <FlaskConical size={13} /> Issue sample
+                </button>
+              </div>
+            )}
             {showSalesForm && (
               <SalesForm
                 accent={meta.accent}
@@ -3339,7 +3414,16 @@ function AuthenticatedApp() {
                 onSubmit={sellStock}
               />
             )}
-            {sales.length === 0 && !showSalesForm && (
+            {showSampleIssueForm && (
+              <SampleIssueForm
+                accent={meta.accent}
+                name={session.name}
+                finishedGoods={finishedGoods}
+                onClose={() => setShowSampleIssueForm(false)}
+                onSubmit={sellStock}
+              />
+            )}
+            {sales.length === 0 && !showSalesForm && !showSampleIssueForm && (
               <div className="text-center py-14">
                 <ShoppingCart size={28} className="mx-auto text-zinc-300 mb-2" />
                 <p className="text-sm text-zinc-500">No sales logged yet for {meta.label}.</p>
@@ -3512,7 +3596,7 @@ function AuthenticatedApp() {
 
       {tab === "sales" && (
         <button
-          onClick={() => setShowSalesForm(true)}
+          onClick={() => { setShowSampleIssueForm(false); setShowSalesForm(true); }}
           className="fixed bottom-6 right-6 w-12 h-12 rounded-full flex items-center justify-center shadow-lg"
           style={{ background: meta.accent }}
           aria-label="Log new sale"
