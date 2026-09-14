@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+  PieChart, Pie, Cell,
 } from "recharts";
 
 const DARK_GREEN = "#155830";
@@ -90,6 +91,18 @@ function fmtDate(iso) {
   return d.toLocaleDateString(undefined, { day: "numeric", month: "short" }) + " · " +
     d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }
+
+// Compact ₹ formatting for chart axes (₹1.2L, ₹45k) so labels stay narrow
+// enough not to get clipped against the card edge.
+function compactINR(n) {
+  const sign = n < 0 ? "-" : "";
+  const v = Math.abs(n);
+  if (v >= 100000) return `${sign}₹${(v / 100000).toFixed(v % 100000 === 0 ? 0 : 1)}L`;
+  if (v >= 1000) return `${sign}₹${(v / 1000).toFixed(v % 1000 === 0 ? 0 : 1)}k`;
+  return `${sign}₹${v.toFixed(0)}`;
+}
+
+const PIE_COLORS = ["#155830", "#59A249", "#3E8E86", "#D9A441", "#A8672A", "#8A8F98", "#D1453B", "#4B5563"];
 
 // Builds a full, print-ready HTML document for a lab test — opened in a new
 // tab so the user can "Print / Save as PDF" a professional-looking report.
@@ -2546,7 +2559,18 @@ function SampleCard({ sample, accent, isBoss, onUpdateStatus, onLogUsage, onDele
   );
 }
 
+// Groups a { name: value } map into the top N entries plus a bucketed
+// "Other" slice, for pie/bar charts that shouldn't grow unbounded with SKUs.
+function topNWithOther(map, limit = 6) {
+  const entries = Object.entries(map).sort((a, b) => b[1] - a[1]);
+  const top = entries.slice(0, limit).map(([name, value]) => ({ name, value }));
+  const otherSum = entries.slice(limit).reduce((s, [, v]) => s + v, 0);
+  if (otherSum > 0) top.push({ name: "Other", value: otherSum });
+  return top;
+}
+
 function Dashboard({ meta, items, batches, sales, canViewCosting }) {
+  const [profitView, setProfitView] = useState("revenue"); // revenue | profit
   const lowStockItems = items.filter((i) => i.qty <= i.threshold && !(i.category === "Finished good" && i.qty <= 0));
   const rawCount = items.filter((i) => i.category === "Raw material").length;
   const packCount = items.filter((i) => i.category === "Packaging").length;
@@ -2561,8 +2585,39 @@ function Dashboard({ meta, items, batches, sales, canViewCosting }) {
   sales.forEach((x) => {
     revenueByProduct[x.productName] = (revenueByProduct[x.productName] || 0) + x.totalAmount;
   });
-  const topProducts = Object.entries(revenueByProduct).sort((a, b) => b[1] - a[1]).slice(0, 6);
-  const topProductsChart = topProducts.map(([name, revenue]) => ({ name, revenue }));
+  const topProductsChart = topNWithOther(revenueByProduct);
+
+  // Blended cost/kg per product, from all logged production batches for
+  // that product — used to estimate profit on each sale of it.
+  const costTotalsByProduct = {};
+  batches.forEach((b) => {
+    if (!b.productName) return;
+    const key = b.productName.trim().toLowerCase();
+    if (!costTotalsByProduct[key]) costTotalsByProduct[key] = { cost: 0, qty: 0 };
+    costTotalsByProduct[key].cost += b.costing?.totalCost || 0;
+    costTotalsByProduct[key].qty += b.outputQty || 0;
+  });
+  const costPerKgByProduct = {};
+  Object.entries(costTotalsByProduct).forEach(([key, v]) => {
+    if (v.qty > 0) costPerKgByProduct[key] = v.cost / v.qty;
+  });
+
+  let totalCost = 0;
+  let costDataMissing = false;
+  const profitByProduct = {};
+  sales.forEach((x) => {
+    const key = (x.productName || "").trim().toLowerCase();
+    const costPerKg = costPerKgByProduct[key];
+    if (costPerKg == null) costDataMissing = true;
+    const cost = (costPerKg || 0) * x.qty;
+    totalCost += cost;
+    profitByProduct[x.productName] = (profitByProduct[x.productName] || 0) + (x.totalAmount - cost);
+  });
+  const totalProfit = totalRevenue - totalCost;
+  const margin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0;
+  const profitProductChart = topNWithOther(profitByProduct);
+  const activeChart = profitView === "revenue" ? topProductsChart : profitProductChart;
+  const activeLabel = profitView === "revenue" ? "Revenue" : "Profit";
 
   const outputByDate = {};
   batches.forEach((b) => {
@@ -2644,10 +2699,10 @@ function Dashboard({ meta, items, batches, sales, canViewCosting }) {
         {productionChart.length > 0 ? (
           <div style={{ width: "100%", height: 160 }}>
             <ResponsiveContainer>
-              <BarChart data={productionChart} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+              <BarChart data={productionChart} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#00000010" vertical={false} />
                 <XAxis dataKey="date" tickFormatter={shortDate} tick={{ fontSize: 10, fill: "#9CA3AF" }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 10, fill: "#9CA3AF" }} axisLine={false} tickLine={false} width={36} />
+                <YAxis tick={{ fontSize: 10, fill: "#9CA3AF" }} axisLine={false} tickLine={false} width={32} />
                 <Tooltip
                   labelFormatter={shortDate}
                   formatter={(v) => [`${v} kg`, "Output"]}
@@ -2679,10 +2734,10 @@ function Dashboard({ meta, items, batches, sales, canViewCosting }) {
         {salesChart.length > 0 ? (
           <div style={{ width: "100%", height: 160 }}>
             <ResponsiveContainer>
-              <LineChart data={salesChart} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+              <LineChart data={salesChart} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#00000010" vertical={false} />
                 <XAxis dataKey="date" tickFormatter={shortDate} tick={{ fontSize: 10, fill: "#9CA3AF" }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 10, fill: "#9CA3AF" }} axisLine={false} tickLine={false} width={36} />
+                <YAxis tickFormatter={compactINR} tick={{ fontSize: 10, fill: "#9CA3AF" }} axisLine={false} tickLine={false} width={44} />
                 <Tooltip
                   labelFormatter={shortDate}
                   formatter={(v) => [`₹${v.toFixed(0)}`, "Revenue"]}
@@ -2695,25 +2750,92 @@ function Dashboard({ meta, items, batches, sales, canViewCosting }) {
         ) : (
           <p className="text-xs text-zinc-400 text-center py-4">No sales data yet to chart.</p>
         )}
+      </div>
 
-        {topProductsChart.length > 0 && (
-          <div className="mt-2 pt-3" style={{ borderTop: "1px solid #00000010" }}>
-            <div className="text-[10px] uppercase tracking-wide text-zinc-400 mb-1.5">Revenue by product</div>
-            <div style={{ width: "100%", height: Math.max(120, topProductsChart.length * 32) }}>
+      <div className="rounded-xl p-4" style={cardStyle}>
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-zinc-400">
+            <TrendingUp size={12} /> Profit
+          </div>
+          <div className="flex gap-1">
+            {[{ key: "revenue", label: "Revenue" }, { key: "profit", label: "Profit" }].map((o) => (
+              <button
+                key={o.key}
+                onClick={() => setProfitView(o.key)}
+                className="px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors"
+                style={{
+                  background: profitView === o.key ? meta.accent : "transparent",
+                  color: profitView === o.key ? "#ffffff" : "#8A8F98",
+                  border: profitView === o.key ? "none" : "1px solid #00000014",
+                }}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-2 text-center mb-2">
+          <div>
+            <div className="text-lg font-bold" style={{ color: totalProfit >= 0 ? meta.accent : "#D1453B" }}>₹{totalProfit.toFixed(0)}</div>
+            <div className="text-[10px] text-zinc-500">Total profit</div>
+          </div>
+          <div>
+            <div className="text-lg font-bold text-zinc-900">{margin.toFixed(1)}%</div>
+            <div className="text-[10px] text-zinc-500">Margin</div>
+          </div>
+        </div>
+        {costDataMissing && (
+          <p className="text-[10px] text-zinc-400 text-center mb-2">
+            Profit is estimated from logged production costing — products with no batches logged yet are counted at ₹0 cost.
+          </p>
+        )}
+
+        {activeChart.length > 0 ? (
+          <>
+            <div style={{ width: "100%", height: 200 }}>
               <ResponsiveContainer>
-                <BarChart data={topProductsChart} layout="vertical" margin={{ top: 0, right: 16, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#00000010" horizontal={false} />
-                  <XAxis type="number" tick={{ fontSize: 10, fill: "#9CA3AF" }} axisLine={false} tickLine={false} />
-                  <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: "#4B5563" }} axisLine={false} tickLine={false} width={90} />
+                <PieChart>
+                  <Pie data={activeChart} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={40} outerRadius={70} paddingAngle={2} isAnimationActive={false}>
+                    {activeChart.map((entry, i) => (
+                      <Cell key={entry.name} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+                    ))}
+                  </Pie>
                   <Tooltip
-                    formatter={(v) => [`₹${v.toFixed(0)}`, "Revenue"]}
+                    formatter={(v) => [`₹${v.toFixed(0)}`, activeLabel]}
                     contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #00000014" }}
                   />
-                  <Bar dataKey="revenue" fill={meta.accent} radius={[0, 4, 4, 0]} />
-                </BarChart>
+                </PieChart>
               </ResponsiveContainer>
             </div>
-          </div>
+            <div className="flex flex-wrap justify-center gap-x-3 gap-y-1 mt-1">
+              {activeChart.map((entry, i) => (
+                <div key={entry.name} className="flex items-center gap-1 text-[10px] text-zinc-600">
+                  <span className="inline-block rounded-sm" style={{ width: 8, height: 8, background: PIE_COLORS[i % PIE_COLORS.length] }} />
+                  {entry.name}
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-2 pt-3" style={{ borderTop: "1px solid #00000010" }}>
+              <div className="text-[10px] uppercase tracking-wide text-zinc-400 mb-1.5">{activeLabel} by product</div>
+              <div style={{ width: "100%", height: Math.max(120, activeChart.length * 32) }}>
+                <ResponsiveContainer>
+                  <BarChart data={activeChart} layout="vertical" margin={{ top: 0, right: 16, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#00000010" horizontal={false} />
+                    <XAxis type="number" tickFormatter={compactINR} tick={{ fontSize: 10, fill: "#9CA3AF" }} axisLine={false} tickLine={false} />
+                    <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: "#4B5563" }} axisLine={false} tickLine={false} width={90} />
+                    <Tooltip
+                      formatter={(v) => [`₹${v.toFixed(0)}`, activeLabel]}
+                      contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #00000014" }}
+                    />
+                    <Bar dataKey="value" fill={meta.accent} radius={[0, 4, 4, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </>
+        ) : (
+          <p className="text-xs text-zinc-400 text-center py-4">No sales data yet to chart.</p>
         )}
       </div>
     </div>
@@ -2995,7 +3117,7 @@ function AuthenticatedApp() {
     : isHomecareOrdersOnly
     ? [{ key: "orders", label: "Orders", icon: ClipboardList, tabs: ["orders"] }]
     : [
-        { key: "dashboard", label: "Dashboard", icon: LayoutDashboard, tabs: ["dashboard"] },
+        ...(isBoss ? [{ key: "dashboard", label: "Dashboard", icon: LayoutDashboard, tabs: ["dashboard"] }] : []),
         { key: "operations", label: "Operations", icon: Layers, tabs: ["orders", "items", "planning", "production"] },
         { key: "sales", label: "Sales", icon: ShoppingCart, tabs: ["sales"] },
         ...(canSeeLabTab || samplesOnly ? [{ key: "lab", label: TAB_META.lab.label, icon: TAB_META.lab.icon, tabs: ["lab"] }] : []),
@@ -3010,6 +3132,7 @@ function AuthenticatedApp() {
       setBrand("homecare");
     }
     if (samplesOnly) setLabSubTab("samples");
+    if (tab === "dashboard" && !isBoss) setTab("items");
   }, [session]);
 
   const handleLogin = (user) => {
@@ -3393,10 +3516,10 @@ function AuthenticatedApp() {
         </div>
       )}
 
-      <div className="px-4 py-4 pb-24">
+      <div className="px-4 py-4 pb-40">
         {loading || sharedLoading ? (
           <div className="text-center text-zinc-400 text-sm py-10">Loading…</div>
-        ) : tab === "dashboard" ? (
+        ) : tab === "dashboard" && isBoss ? (
           <Dashboard meta={meta} items={combined} batches={batches} sales={sales} canViewCosting={canViewCosting} />
         ) : tab === "items" ? (
           <>
