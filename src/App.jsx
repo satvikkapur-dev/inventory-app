@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { doc, onSnapshot, setDoc } from "firebase/firestore";
+import { doc, onSnapshot, setDoc, getDoc } from "firebase/firestore";
 import { onAuthStateChanged, signInAnonymously } from "firebase/auth";
 import { db, auth } from "./firebase";
 import {
@@ -63,7 +63,7 @@ const USERS = [
   { name: "SCPL", pin: "8941", role: "staff", canViewCosting: true },
   { name: "Vijay", pin: "2314", role: "staff", canViewCosting: false },
   { name: "Jyoti", pin: "3214", role: "staff", canViewCosting: false },
-  { name: "Angad", pin: "4512", role: "staff", canViewCosting: false, canEnterPrice: true, canLogSamples: true, canEditProduction: true, canIssueSample: true },
+  { name: "Angad", pin: "4512", role: "staff", canViewCosting: false, canEnterPrice: true, canLogSamples: true, canEditProduction: true, canIssueSample: true, canBackupData: true },
   { name: "Mohit", pin: "4213", role: "lab", canViewCosting: false },
   { name: "Kishore", pin: "9876", role: "homecare_orders", canViewCosting: false },
 ];
@@ -2949,6 +2949,7 @@ function AuthenticatedApp() {
   const [editingBatch, setEditingBatch] = useState(null);
   const [showSalesForm, setShowSalesForm] = useState(false);
   const [showSampleIssueForm, setShowSampleIssueForm] = useState(false);
+  const [backupState, setBackupState] = useState("idle"); // idle | saving | done | error
   const [showLabForm, setShowLabForm] = useState(false);
   const [editingTest, setEditingTest] = useState(null);
   const [showSampleForm, setShowSampleForm] = useState(false);
@@ -2971,6 +2972,7 @@ function AuthenticatedApp() {
   const canEnterPrice = canViewCosting || !!session?.canEnterPrice;
   const canEditProduction = isBoss || !!session?.canEditProduction;
   const canIssueSample = isBoss || !!session?.canIssueSample;
+  const canBackupData = isBoss || !!session?.canBackupData;
   const isLabOnly = session?.role === "lab";
   const isHomecareOrdersOnly = session?.role === "homecare_orders";
   const canSeeLabTab = canViewCosting || isLabOnly;
@@ -3011,7 +3013,7 @@ function AuthenticatedApp() {
   }, [session]);
 
   const handleLogin = (user) => {
-    saveSession({ name: user.name, role: user.role, canViewCosting: !!user.canViewCosting, canEnterPrice: !!user.canEnterPrice, canLogSamples: !!user.canLogSamples, canEditProduction: !!user.canEditProduction, canIssueSample: !!user.canIssueSample });
+    saveSession({ name: user.name, role: user.role, canViewCosting: !!user.canViewCosting, canEnterPrice: !!user.canEnterPrice, canLogSamples: !!user.canLogSamples, canEditProduction: !!user.canEditProduction, canIssueSample: !!user.canIssueSample, canBackupData: !!user.canBackupData });
     record(user.name, user.role);
   };
 
@@ -3166,6 +3168,51 @@ function AuthenticatedApp() {
     saveSales(sales.filter((s) => s.id !== id));
   };
 
+  const downloadBackup = async () => {
+    if (!canBackupData || backupState === "saving") return;
+    setBackupState("saving");
+    try {
+      const readDoc = async (collection, id) => {
+        const snap = await getDoc(doc(db, collection, id));
+        return snap.exists() ? snap.data() : null;
+      };
+      const brandKeys = Object.keys(BRANDS);
+      const brandsData = {};
+      for (const b of brandKeys) {
+        brandsData[b] = {
+          items: (await readDoc("inventory", b))?.items || [],
+          production: (await readDoc("production", b))?.batches || [],
+          sales: (await readDoc("sales", b))?.sales || [],
+          orders: (await readDoc("orders", b))?.orders || [],
+          labTests: (await readDoc("lab", b))?.tests || [],
+          samples: (await readDoc("samples", b))?.samples || [],
+        };
+      }
+      const backup = {
+        generatedAt: new Date().toISOString(),
+        generatedBy: session.name,
+        sharedItems: (await readDoc("inventory", "shared"))?.items || [],
+        logins: (await readDoc("activity", "logins"))?.entries || [],
+        brands: brandsData,
+      };
+      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `urbnfettch-backup-${todayStr()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setBackupState("done");
+    } catch (e) {
+      console.error("Backup failed", e);
+      setBackupState("error");
+    } finally {
+      setTimeout(() => setBackupState("idle"), 2500);
+    }
+  };
+
   const addLabTest = (test) => {
     saveTests([test, ...tests]);
     setLabResetKey((k) => k + 1);
@@ -3217,10 +3264,25 @@ function AuthenticatedApp() {
       <div className="px-4 pt-6 pb-4" style={{ borderBottom: "1px solid #00000010" }}>
         <div className="flex items-center justify-between mb-4">
           <Wordmark />
-          <button onClick={() => saveSession(null)} className="flex items-center gap-1 text-[11px] text-zinc-500">
-            {isBoss && <Shield size={11} style={{ color: meta.accent }} />}
-            <User size={11} /> {session.name}
-          </button>
+          <div className="flex items-center gap-3">
+            {canBackupData && (
+              <button
+                onClick={downloadBackup}
+                disabled={backupState === "saving"}
+                aria-label="Backup all data"
+                title="Backup all data"
+                className="flex items-center gap-1 text-[11px]"
+                style={{ color: backupState === "done" ? "#2E9E5B" : backupState === "error" ? "#D1453B" : "#6B7280" }}
+              >
+                <Download size={11} />
+                {backupState === "saving" ? "Saving…" : backupState === "done" ? "Saved" : backupState === "error" ? "Failed" : "Backup"}
+              </button>
+            )}
+            <button onClick={() => saveSession(null)} className="flex items-center gap-1 text-[11px] text-zinc-500">
+              {isBoss && <Shield size={11} style={{ color: meta.accent }} />}
+              <User size={11} /> {session.name}
+            </button>
+          </div>
         </div>
         {!isHomecareOrdersOnly && (
           <div className="flex gap-2">
