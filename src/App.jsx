@@ -2955,6 +2955,30 @@ function AuthenticatedApp() {
   const samplesOnly = !!session?.canLogSamples && !canSeeLabTab;
   const [labResetKey, setLabResetKey] = useState(0);
 
+  const TAB_META = {
+    dashboard: { label: "Dashboard", icon: LayoutDashboard },
+    items: { label: "Items", icon: Package },
+    orders: { label: "Orders", icon: ClipboardList },
+    planning: { label: "Production Planning", icon: ClipboardCheck },
+    production: { label: "Production", icon: Factory },
+    sales: { label: "Sales", icon: ShoppingCart },
+    lab: { label: canSeeLabTab ? "Lab" : "Samples", icon: canSeeLabTab ? FlaskConical : Inbox },
+    history: { label: "History", icon: HistoryIcon },
+    logins: { label: "Logins", icon: Shield },
+  };
+  const navGroups = isLabOnly
+    ? [{ key: "lab", label: "Lab", icon: FlaskConical, tabs: ["lab"] }]
+    : isHomecareOrdersOnly
+    ? [{ key: "orders", label: "Orders", icon: ClipboardList, tabs: ["orders"] }]
+    : [
+        { key: "dashboard", label: "Dashboard", icon: LayoutDashboard, tabs: ["dashboard"] },
+        { key: "operations", label: "Operations", icon: Layers, tabs: ["orders", "items", "planning", "production"] },
+        { key: "sales", label: "Sales", icon: ShoppingCart, tabs: ["sales"] },
+        ...(canSeeLabTab || samplesOnly ? [{ key: "lab", label: TAB_META.lab.label, icon: TAB_META.lab.icon, tabs: ["lab"] }] : []),
+        { key: "records", label: "Records", icon: HistoryIcon, tabs: isBoss ? ["history", "logins"] : ["history"] },
+      ];
+  const activeGroup = navGroups.find((g) => g.tabs.includes(tab)) || navGroups[0];
+
   useEffect(() => {
     if (session?.role === "lab") setTab("lab");
     if (session?.role === "homecare_orders") {
@@ -3208,32 +3232,39 @@ function AuthenticatedApp() {
       )}
 
       <div className="flex gap-1 px-4 mt-4 overflow-x-auto">
-        {(isLabOnly
-          ? [{ key: "lab", label: "Lab", icon: FlaskConical }]
-          : isHomecareOrdersOnly
-          ? [{ key: "orders", label: "Orders", icon: ClipboardList }]
-          : [
-              { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-              { key: "items", label: "Items", icon: Package },
-              { key: "orders", label: "Orders", icon: ClipboardList },
-              { key: "planning", label: "Production Planning", icon: ClipboardCheck },
-              { key: "production", label: "Production", icon: Factory },
-              { key: "sales", label: "Sales", icon: ShoppingCart },
-              ...(canSeeLabTab ? [{ key: "lab", label: "Lab", icon: FlaskConical }] : samplesOnly ? [{ key: "lab", label: "Samples", icon: Inbox }] : []),
-              { key: "history", label: "History", icon: HistoryIcon },
-              ...(isBoss ? [{ key: "logins", label: "Logins", icon: Shield }] : []),
-            ]
-        ).map(({ key, label, icon: Icon }) => (
+        {navGroups.map((g) => (
           <button
-            key={key}
-            onClick={() => setTab(key)}
+            key={g.key}
+            onClick={() => setTab(g.tabs.includes(tab) ? tab : g.tabs[0])}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors whitespace-nowrap"
-            style={{ background: tab === key ? meta.accent : "transparent", color: tab === key ? "#ffffff" : "#6B7280" }}
+            style={{ background: activeGroup.key === g.key ? meta.accent : "transparent", color: activeGroup.key === g.key ? "#ffffff" : "#6B7280" }}
           >
-            <Icon size={12} /> {label}
+            <g.icon size={12} /> {g.label}
           </button>
         ))}
       </div>
+
+      {activeGroup.tabs.length > 1 && (
+        <div className="flex gap-1 px-4 mt-1.5 overflow-x-auto">
+          {activeGroup.tabs.map((tKey) => {
+            const t = TAB_META[tKey];
+            return (
+              <button
+                key={tKey}
+                onClick={() => setTab(tKey)}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors whitespace-nowrap"
+                style={{
+                  background: tab === tKey ? `${meta.accent}18` : "transparent",
+                  color: tab === tKey ? meta.accent : "#8A8F98",
+                  border: tab === tKey ? `1px solid ${meta.accent}40` : "1px solid transparent",
+                }}
+              >
+                <t.icon size={11} /> {t.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {tab === "items" && (
         <div className="flex items-center justify-between gap-2 px-4 mt-3">
