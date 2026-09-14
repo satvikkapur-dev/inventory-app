@@ -2418,15 +2418,17 @@ function SampleCard({ sample, accent, isBoss, onUpdateStatus, onLogUsage, onDele
   const [open, setOpen] = useState(false);
   const [useQty, setUseQty] = useState("");
   const [useNote, setUseNote] = useState("");
+  const [useType, setUseType] = useState("used");
   const status = SAMPLE_STATUSES[sample.status] || SAMPLE_STATUSES.received;
   const remaining = sample.qtyRemaining != null ? sample.qtyRemaining : sample.qtyReceived;
 
   const logUsage = () => {
     const q = Number(useQty);
     if (!q || q <= 0) return;
-    onLogUsage(sample.id, Math.min(q, remaining), useNote.trim());
+    onLogUsage(sample.id, Math.min(q, remaining), useNote.trim(), useType);
     setUseQty("");
     setUseNote("");
+    setUseType("used");
   };
 
   return (
@@ -2460,24 +2462,42 @@ function SampleCard({ sample, accent, isBoss, onUpdateStatus, onLogUsage, onDele
             Remaining: {remaining}{sample.unit} of {sample.qtyReceived}{sample.unit} received
           </div>
           {remaining > 0 && (
-            <div className="flex gap-2 mt-1">
-              <input
-                placeholder={`Qty used, ${sample.unit}`}
-                type="number"
-                value={useQty}
-                onChange={(e) => setUseQty(e.target.value)}
-                className={inputCls}
-                style={{ maxWidth: "7rem" }}
-              />
-              <input
-                placeholder="For (e.g. test #123)"
-                value={useNote}
-                onChange={(e) => setUseNote(e.target.value)}
-                className={inputCls + " flex-1"}
-              />
-              <button onClick={logUsage} className="px-3 rounded-lg text-xs font-semibold shrink-0" style={{ background: accent, color: "#ffffff" }}>
-                Log use
-              </button>
+            <div className="mt-1">
+              <div className="flex gap-1.5 mb-1.5">
+                {[{ key: "used", label: "Used" }, { key: "issued", label: "Issued to someone" }].map((o) => (
+                  <button
+                    key={o.key}
+                    onClick={() => setUseType(o.key)}
+                    className="px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors"
+                    style={{
+                      background: useType === o.key ? accent : "transparent",
+                      color: useType === o.key ? "#ffffff" : "#8A8F98",
+                      border: useType === o.key ? "none" : "1px solid #00000014",
+                    }}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <input
+                  placeholder={`Qty, ${sample.unit}`}
+                  type="number"
+                  value={useQty}
+                  onChange={(e) => setUseQty(e.target.value)}
+                  className={inputCls}
+                  style={{ maxWidth: "7rem" }}
+                />
+                <input
+                  placeholder={useType === "issued" ? "Given to (name)" : "For (e.g. test #123)"}
+                  value={useNote}
+                  onChange={(e) => setUseNote(e.target.value)}
+                  className={inputCls + " flex-1"}
+                />
+                <button onClick={logUsage} className="px-3 rounded-lg text-xs font-semibold shrink-0" style={{ background: accent, color: "#ffffff" }}>
+                  {useType === "issued" ? "Log issue" : "Log use"}
+                </button>
+              </div>
             </div>
           )}
 
@@ -2486,7 +2506,9 @@ function SampleCard({ sample, accent, isBoss, onUpdateStatus, onLogUsage, onDele
               <div className="text-[10px] uppercase tracking-wide text-zinc-400 mb-1">Usage history</div>
               {sample.history.map((h) => (
                 <div key={h.id} className="flex items-center justify-between text-xs py-1">
-                  <span className="text-zinc-600 truncate">{h.note || "Used"}</span>
+                  <span className="text-zinc-600 truncate">
+                    {h.type === "issued" ? `Issued to ${h.note || "someone"}` : h.note || "Used"}
+                  </span>
                   <span className="mono-font shrink-0 ml-2" style={{ color: "#D1453B" }}>−{h.qty}{sample.unit}</span>
                 </div>
               ))}
@@ -3160,7 +3182,7 @@ function AuthenticatedApp() {
 
   const addSample = (sample) => saveSamples([sample, ...samples]);
   const updateSampleStatus = (id, status) => saveSamples(samples.map((s) => (s.id === id ? { ...s, status } : s)));
-  const logSampleUsage = (id, qty, note) => {
+  const logSampleUsage = (id, qty, note, type = "used") => {
     saveSamples(
       samples.map((s) => {
         if (s.id !== id) return s;
@@ -3169,7 +3191,7 @@ function AuthenticatedApp() {
           ...s,
           qtyRemaining: Math.max(0, remaining - qty),
           history: [
-            { id: uid(), qty, note, date: new Date().toISOString(), by: session.name },
+            { id: uid(), qty, note, type, date: new Date().toISOString(), by: session.name },
             ...(s.history || []),
           ],
         };
