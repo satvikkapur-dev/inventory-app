@@ -573,9 +573,16 @@ function reverseBatchStock(batch, items, sharedItems, actorName) {
   );
   if (fgIdx >= 0) {
     const fg = nextItems[fgIdx];
+    // Deliberately not floored at 0: this reversal is always immediately
+    // followed by re-applying a batch's (possibly edited) output on top of
+    // it. If some of the original output was already sold before the edit,
+    // flooring here would silently discard that deficit and the reapply
+    // step would manufacture phantom stock that doesn't physically exist.
+    // Letting it go negative here means the paired apply nets out to the
+    // correct true remaining quantity instead.
     nextItems[fgIdx] = {
       ...fg,
-      qty: round2(Math.max(0, fg.qty - batch.outputQty)),
+      qty: round2(fg.qty - batch.outputQty),
       history: [
         { id: uid(), type: "out", qty: batch.outputQty, date: new Date().toISOString(), note: `Reversed — batch ${batch.batchNumber}`, by: actorName },
         ...fg.history,
