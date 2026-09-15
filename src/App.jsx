@@ -183,6 +183,7 @@ function buildLabReportHTML(test, brandLabel, extras = {}) {
   .sig { margin-top: 50px; display: flex; justify-content: space-between; font-family: Arial, sans-serif; font-size: 11px; }
   .sig div { width: 45%; }
   .sig .line { border-top: 1px solid #333; margin-top: 40px; padding-top: 6px; color: #666; font-size: 10px; }
+  .disclaimer { margin-top: 18px; font-family: Arial, sans-serif; font-size: 10px; color: #999; text-align: center; font-style: italic; }
   .print-bar { text-align: center; margin-bottom: 24px; }
   .print-bar button { font-family: Arial, sans-serif; background: #155830; color: #fff; border: none; padding: 10px 22px; border-radius: 6px; font-size: 13px; cursor: pointer; }
   @media print { .print-bar { display: none; } body { padding: 0; } }
@@ -223,12 +224,12 @@ function buildLabReportHTML(test, brandLabel, extras = {}) {
 
   <div class="sig">
     <div><div class="line">Tested By — ${testedBy || test.by}</div></div>
-    <div><div class="line">Authorized Signatory</div></div>
   </div>
+  <div class="disclaimer">This is a system-generated report and does not require a signature.</div>
 
   <div class="footer">
     <span>Generated ${fmtDate(new Date().toISOString())}</span>
-    <span>System-generated report — URBNFETTCH Inventory Tracker</span>
+    <span>System-generated report — URBNFETTCH ERP System</span>
   </div>
 </body>
 </html>`;
@@ -286,6 +287,7 @@ function buildItemsReportHTML(items, brandLabel, filterLabel, canViewCosting) {
   .summary .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: #888; margin-top: 2px; }
   .summary .num.alert { color: #D1453B; }
   .footer { margin-top: 60px; font-family: Arial, sans-serif; font-size: 10px; color: #999; display: flex; justify-content: space-between; border-top: 1px solid #eee; padding-top: 14px; }
+  .disclaimer { margin-top: 40px; font-family: Arial, sans-serif; font-size: 10px; color: #999; text-align: center; font-style: italic; }
   .print-bar { text-align: center; margin-bottom: 24px; }
   .print-bar button { font-family: Arial, sans-serif; background: #155830; color: #fff; border: none; padding: 10px 22px; border-radius: 6px; font-size: 13px; cursor: pointer; }
   @media print { .print-bar { display: none; } body { padding: 0; } }
@@ -324,9 +326,11 @@ function buildItemsReportHTML(items, brandLabel, filterLabel, canViewCosting) {
     </tbody>
   </table>
 
+  <div class="disclaimer">This is a system-generated report and does not require a signature.</div>
+
   <div class="footer">
     <span>Generated ${fmtDate(new Date().toISOString())}</span>
-    <span>System-generated report — URBNFETTCH Inventory Tracker</span>
+    <span>System-generated report — URBNFETTCH ERP System</span>
   </div>
 </body>
 </html>`;

@@ -9,9 +9,9 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['icon-192.png', 'icon-512.png'],
       manifest: {
-        name: 'Inventory Tracker',
-        short_name: 'Inventory',
-        description: 'Shared inventory tracker for UrbnFettch and Homecare',
+        name: 'URBNFETTCH ERP System',
+        short_name: 'URBNFETTCH ERP',
+        description: 'ERP system for URBNFETTCH — inventory, production, sales and lab tracking',
         theme_color: '#15181e',
         background_color: '#15181e',
         display: 'standalone',
