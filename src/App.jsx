@@ -428,7 +428,7 @@ function addStockInLot(item, qty, price) {
 // (with real unit costs and costing filled in). Pure — callers persist the
 // result. actorName attributes the resulting stock-movement history entries
 // (separate from batch.by, which is who logged/owns the batch record).
-function applyBatchStock(batch, items, sharedItems, actorName) {
+function applyBatchStock(batch, items, sharedItems, actorName, editTag) {
   let materialCost = 0;
   const finalMaterials = [];
   let nextItems = [...items];
@@ -451,7 +451,7 @@ function applyBatchStock(batch, items, sharedItems, actorName) {
       qty: newQty,
       lots: newLots,
       history: [
-        { id: uid(), type: "out", qty: m.qty, date: new Date().toISOString(), note: `Used in batch ${batch.batchNumber} (${batch.productName})`, priceNote: unitCostUsed ? `₹${unitCostUsed.toFixed(2)}/${m.unit}` : null, by: actorName },
+        { id: uid(), type: "out", qty: m.qty, date: new Date().toISOString(), note: `Used in batch ${batch.batchNumber} (${batch.productName})`, priceNote: unitCostUsed ? `₹${unitCostUsed.toFixed(2)}/${m.unit}` : null, by: actorName, balance: newQty, editTag },
         ...original.history,
       ],
     };
@@ -477,7 +477,7 @@ function applyBatchStock(batch, items, sharedItems, actorName) {
         qty: newQty,
         lots: newLots,
         history: [
-          { id: uid(), type: "out", qty: unitsUsed, date: new Date().toISOString(), note: `Used as container for batch ${batch.batchNumber} (${batch.productName})`, priceNote: unitCostUsed ? `₹${unitCostUsed.toFixed(2)}/unit` : null, by: actorName },
+          { id: uid(), type: "out", qty: unitsUsed, date: new Date().toISOString(), note: `Used as container for batch ${batch.batchNumber} (${batch.productName})`, priceNote: unitCostUsed ? `₹${unitCostUsed.toFixed(2)}/unit` : null, by: actorName, balance: newQty, editTag },
           ...original.history,
         ],
       };
@@ -505,18 +505,18 @@ function applyBatchStock(batch, items, sharedItems, actorName) {
   );
 
   if (existingFG) {
-    nextItems = nextItems.map((i) =>
-      i.id === existingFG.id
-        ? {
-            ...i,
-            qty: round2(i.qty + batch.outputQty),
-            history: [
-              { id: uid(), type: "in", qty: batch.outputQty, date: new Date().toISOString(), note: `Produced — batch ${batch.batchNumber}`, by: actorName },
-              ...i.history,
-            ],
-          }
-        : i
-    );
+    nextItems = nextItems.map((i) => {
+      if (i.id !== existingFG.id) return i;
+      const newQty = round2(i.qty + batch.outputQty);
+      return {
+        ...i,
+        qty: newQty,
+        history: [
+          { id: uid(), type: "in", qty: batch.outputQty, date: new Date().toISOString(), note: `Produced — batch ${batch.batchNumber}`, by: actorName, balance: newQty, editTag },
+          ...i.history,
+        ],
+      };
+    });
   } else {
     nextItems = [
       {
@@ -528,7 +528,7 @@ function applyBatchStock(batch, items, sharedItems, actorName) {
         threshold: 0,
         supplier: { name: "", contact: "", leadTime: null },
         history: [
-          { id: uid(), type: "in", qty: batch.outputQty, date: new Date().toISOString(), note: `Produced — batch ${batch.batchNumber}`, by: actorName },
+          { id: uid(), type: "in", qty: batch.outputQty, date: new Date().toISOString(), note: `Produced — batch ${batch.batchNumber}`, by: actorName, balance: batch.outputQty, editTag },
         ],
       },
       ...nextItems,
@@ -542,7 +542,7 @@ function applyBatchStock(batch, items, sharedItems, actorName) {
 // container, un-produces the finished good) against plain items/sharedItems
 // arrays. Pure — callers persist the result. Used for both deleting a batch
 // and editing one (reverse the old version, then applyBatchStock the new).
-function reverseBatchStock(batch, items, sharedItems, actorName) {
+function reverseBatchStock(batch, items, sharedItems, actorName, editTag) {
   let nextItems = [...items];
   let nextSharedItems = [...sharedItems];
 
@@ -560,7 +560,7 @@ function reverseBatchStock(batch, items, sharedItems, actorName) {
       qty: newQty,
       lots: newLots,
       history: [
-        { id: uid(), type: "in", qty, date: new Date().toISOString(), note: `Reversed — batch ${batch.batchNumber} (${batch.productName})`, by: actorName },
+        { id: uid(), type: "in", qty, date: new Date().toISOString(), note: `Reversed — batch ${batch.batchNumber} (${batch.productName})`, by: actorName, balance: newQty, editTag },
         ...original.history,
       ],
     };
@@ -583,17 +583,45 @@ function reverseBatchStock(batch, items, sharedItems, actorName) {
     // step would manufacture phantom stock that doesn't physically exist.
     // Letting it go negative here means the paired apply nets out to the
     // correct true remaining quantity instead.
+    const fgNewQty = round2(fg.qty - batch.outputQty);
     nextItems[fgIdx] = {
       ...fg,
-      qty: round2(fg.qty - batch.outputQty),
+      qty: fgNewQty,
       history: [
-        { id: uid(), type: "out", qty: batch.outputQty, date: new Date().toISOString(), note: `Reversed — batch ${batch.batchNumber}`, by: actorName },
+        { id: uid(), type: "out", qty: batch.outputQty, date: new Date().toISOString(), note: `Reversed — batch ${batch.batchNumber}`, by: actorName, balance: fgNewQty, editTag },
         ...fg.history,
       ],
     };
   }
 
   return { nextItems, nextSharedItems };
+}
+
+// Editing a batch reverses its old stock effects then reapplies the edited
+// version, which normally leaves two history lines per touched item (a
+// "Reversed" and a fresh "Used"/"Produced") even when nothing about that
+// item actually changed. Collapses any pair of entries tagged with the same
+// editTag into one net "Adjusted" entry, so the log reads as one real
+// change instead of edit-mechanics noise.
+function collapseEditHistory(list, editTag, batchNumber) {
+  return list.map((item) => {
+    if (item.history.length < 2) return item;
+    const [top, second, ...rest] = item.history;
+    if (top.editTag !== editTag || second.editTag !== editTag) return item;
+    const signed = (e) => (e.type === "in" ? e.qty : -e.qty);
+    const net = round2(signed(top) + signed(second));
+    if (net === 0) return { ...item, history: rest };
+    const merged = {
+      id: uid(),
+      type: net > 0 ? "in" : "out",
+      qty: Math.abs(net),
+      date: top.date,
+      note: `Adjusted — batch ${batchNumber} (edited)`,
+      by: top.by,
+      balance: top.balance,
+    };
+    return { ...item, history: [merged, ...rest] };
+  });
 }
 
 function Wordmark({ size = "text-lg" }) {
@@ -953,7 +981,7 @@ function ItemForm({ accent, name, canEnterPrice, onAdd, onClose }) {
         leadTime: leadTime ? Number(leadTime) : null,
       },
       history: [
-        { id: uid(), type: "in", qty: q, date: new Date().toISOString(), note: "Initial stock", by: name },
+        { id: uid(), type: "in", qty: q, date: new Date().toISOString(), note: "Initial stock", by: name, balance: q },
       ],
     });
     onClose();
@@ -1146,7 +1174,8 @@ function EditItemForm({ accent, item, canViewCosting, onSave, onClose }) {
   );
 }
 
-function MovementRow({ h, showItem, canViewCosting }) {
+function MovementRow({ h, showItem, canViewCosting, unit }) {
+  const u = unit || h.unit || "";
   const icon = h.type === "in" ? ArrowDownCircle : h.type === "out" ? ArrowUpCircle : Truck;
   const color = h.type === "in" ? "#2E9E5B" : h.type === "out" ? "#D1453B" : "#3E8E86";
   const Icon = icon;
@@ -1163,9 +1192,14 @@ function MovementRow({ h, showItem, canViewCosting }) {
           <User size={9} /> {h.by || "Unknown"} · {fmtDate(h.date)}
         </div>
       </div>
-      <span className="mono-font text-xs shrink-0" style={{ color }}>
-        {h.type === "out" ? "−" : "+"}{fmtQty(h.qty)}
-      </span>
+      <div className="text-right shrink-0">
+        <div className="mono-font text-xs" style={{ color }}>
+          {h.type === "out" ? "−" : h.type === "in" ? "+" : ""}{fmtQty(h.qty)}{u}
+        </div>
+        {h.balance != null && (
+          <div className="mono-font text-[10px] text-zinc-400">→ {fmtQty(h.balance)}{u}</div>
+        )}
+      </div>
     </div>
   );
 }
@@ -1178,6 +1212,7 @@ function ItemCard({ item, accent, name, isBoss, canViewCosting, canEnterPrice, o
   const [editing, setEditing] = useState(false);
   const [renamingName, setRenamingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(item.name);
+  const [showAllHistory, setShowAllHistory] = useState(false);
   const low = item.qty <= item.threshold;
   const pct = item.threshold > 0 ? Math.min(100, (item.qty / (item.threshold * 2)) * 100) : 100;
   const isRawWithLots = item.category === "Raw material" && item.lots && item.lots.length > 0;
@@ -1194,7 +1229,7 @@ function ItemCard({ item, accent, name, isBoss, canViewCosting, canEnterPrice, o
         qty: newQty,
         lots: newLots,
         costPerUnit: newLots ? avgCostOf({ ...item, lots: newLots }) : (item.costPerUnit || 0),
-        history: [{ id: uid(), type, qty: q, date: new Date().toISOString(), note: "Stock in", priceNote, by: name }, ...item.history],
+        history: [{ id: uid(), type, qty: q, date: new Date().toISOString(), note: "Stock in", priceNote, by: name, balance: newQty }, ...item.history],
       });
     } else {
       const { newQty, newLots, unitCostUsed } = consumeMaterial(item, q);
@@ -1203,7 +1238,7 @@ function ItemCard({ item, accent, name, isBoss, canViewCosting, canEnterPrice, o
         ...item,
         qty: newQty,
         lots: newLots,
-        history: [{ id: uid(), type, qty: q, date: new Date().toISOString(), note: "Stock out", priceNote, by: name }, ...item.history],
+        history: [{ id: uid(), type, qty: q, date: new Date().toISOString(), note: "Stock out", priceNote, by: name, balance: newQty }, ...item.history],
       });
     }
     setMoveQty("");
@@ -1217,7 +1252,7 @@ function ItemCard({ item, accent, name, isBoss, canViewCosting, canEnterPrice, o
     onUpdate({
       ...item,
       history: [
-        { id: uid(), type: "reorder", qty: q, date: new Date().toISOString(), note: `Ordered from ${item.supplier?.name || "supplier"}`, by: name },
+        { id: uid(), type: "reorder", qty: q, date: new Date().toISOString(), note: `Ordered from ${item.supplier?.name || "supplier"}`, by: name, balance: item.qty },
         ...item.history,
       ],
     });
@@ -1359,7 +1394,16 @@ function ItemCard({ item, accent, name, isBoss, canViewCosting, canEnterPrice, o
             {item.history.length === 0 ? (
               <div className="text-xs text-zinc-400 py-1">No movements yet.</div>
             ) : (
-              item.history.slice(0, 8).map((h) => <MovementRow key={h.id} h={h} canViewCosting={canViewCosting} />)
+              <>
+                {(showAllHistory ? item.history : item.history.slice(0, 8)).map((h) => (
+                  <MovementRow key={h.id} h={h} canViewCosting={canViewCosting} unit={item.unit} />
+                ))}
+                {item.history.length > 8 && (
+                  <button onClick={() => setShowAllHistory(!showAllHistory)} className="mt-1 text-[11px]" style={{ color: accent }}>
+                    {showAllHistory ? "Show less" : `Show all ${item.history.length} entries`}
+                  </button>
+                )}
+              </>
             )}
           </div>
 
@@ -1439,7 +1483,7 @@ function BulkImportForm({ accent, name, onImport, onClose }) {
         threshold,
         supplier: { name: "", contact: "", leadTime: null },
         history: [
-          { id: uid(), type: "in", qty, date: new Date().toISOString(), note: "Bulk import", by: name },
+          { id: uid(), type: "in", qty, date: new Date().toISOString(), note: "Bulk import", by: name, balance: qty },
         ],
       });
     }
@@ -3286,7 +3330,7 @@ function AuthenticatedApp() {
 
   const allHistory = useMemo(() => {
     const rows = [];
-    combined.forEach((i) => i.history.forEach((h) => rows.push({ ...h, itemName: i.name })));
+    combined.forEach((i) => i.history.forEach((h) => rows.push({ ...h, itemName: i.name, unit: i.unit })));
     return rows.sort((a, b) => new Date(b.date) - new Date(a.date));
   }, [items, sharedItems]);
 
@@ -3351,8 +3395,11 @@ function AuthenticatedApp() {
     const original = batches.find((b) => b.id === editedBatch.id);
     if (!original) return;
 
-    const { nextItems: reversedItems, nextSharedItems: reversedShared } = reverseBatchStock(original, items, sharedItems, session.name);
-    const { finalBatch, nextItems, nextSharedItems } = applyBatchStock(editedBatch, reversedItems, reversedShared, session.name);
+    const editTag = uid();
+    const { nextItems: reversedItems, nextSharedItems: reversedShared } = reverseBatchStock(original, items, sharedItems, session.name, editTag);
+    const { finalBatch, nextItems: appliedItems, nextSharedItems: appliedShared } = applyBatchStock(editedBatch, reversedItems, reversedShared, session.name, editTag);
+    const nextItems = collapseEditHistory(appliedItems, editTag, editedBatch.batchNumber);
+    const nextSharedItems = collapseEditHistory(appliedShared, editTag, editedBatch.batchNumber);
     const finalBatchWithEditTrail = { ...finalBatch, editedBy: session.name, editedAt: new Date().toISOString() };
 
     save(nextItems);
@@ -3391,14 +3438,17 @@ function AuthenticatedApp() {
     const inBrandIdx = items.findIndex((i) => i.id === sale.productId);
     const inSharedIdx = sharedItems.findIndex((i) => i.id === sale.productId);
 
-    const applyDeduction = (product) => ({
-      ...product,
-      qty: round2(Math.max(0, product.qty - sale.qty)),
-      history: [
-        { id: uid(), type: "out", qty: sale.qty, date: new Date().toISOString(), note: sale.type === "sample" ? `Sample issued to ${sale.customerName}` : `Sold to ${sale.customerName}`, by: sale.by },
-        ...product.history,
-      ],
-    });
+    const applyDeduction = (product) => {
+      const newQty = round2(Math.max(0, product.qty - sale.qty));
+      return {
+        ...product,
+        qty: newQty,
+        history: [
+          { id: uid(), type: "out", qty: sale.qty, date: new Date().toISOString(), note: sale.type === "sample" ? `Sample issued to ${sale.customerName}` : `Sold to ${sale.customerName}`, by: sale.by, balance: newQty },
+          ...product.history,
+        ],
+      };
+    };
 
     if (inBrandIdx >= 0) {
       const nextItems = [...items];
