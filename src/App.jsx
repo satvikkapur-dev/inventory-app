@@ -128,7 +128,7 @@ const PIE_COLORS = ["#155830", "#59A249", "#3E8E86", "#D9A441", "#A8672A", "#8A8
 // Builds a full, print-ready HTML document for a lab test — opened in a new
 // tab so the user can "Print / Save as PDF" a professional-looking report.
 function buildLabReportHTML(test, brandLabel, extras = {}) {
-  const { customerName, totalQty, testedBy } = extras;
+  const { customerName, totalQty } = extras;
   const rows = test.parameters
     .map((p) => {
       const spec = p.specMin != null || p.specMax != null
@@ -157,33 +157,32 @@ function buildLabReportHTML(test, brandLabel, extras = {}) {
   @page { margin: 24mm 18mm; }
   * { box-sizing: border-box; }
   body { font-family: Georgia, 'Times New Roman', serif; color: #1a1a1a; margin: 0; padding: 40px; }
-  .logo { height: 110px; display: block; margin-bottom: 12px; }
-  .tagline { font-family: Arial, sans-serif; font-size: 11px; font-weight: 700; color: #155830; letter-spacing: 1.5px; margin-bottom: 14px; }
-  .doc-title { font-family: Arial, sans-serif; font-size: 15px; font-weight: 700; letter-spacing: 2px; text-align: center; margin: 36px 0 4px; text-transform: uppercase; color: #155830; }
-  .doc-sub { font-family: Arial, sans-serif; font-size: 11px; text-align: center; color: #888; margin-bottom: 32px; letter-spacing: 1px; }
-  .rule { border: none; border-top: 2px solid #155830; margin: 0 0 24px; }
-  .meta { width: 100%; border-collapse: collapse; margin-bottom: 28px; font-family: Arial, sans-serif; font-size: 12px; }
-  .meta td { padding: 6px 0; }
+  .letterhead { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .logo { height: 44px; display: block; }
+  .division { font-family: Arial, sans-serif; font-size: 10px; font-weight: 700; color: #4B5563; letter-spacing: 1.5px; text-transform: uppercase; }
+  .rule { border: none; border-top: 1px solid #155830; margin: 0 0 20px; }
+  .doc-title { font-family: Arial, sans-serif; font-size: 14px; font-weight: 700; letter-spacing: 2px; text-align: center; margin: 20px 0 4px; text-transform: uppercase; color: #1a1a1a; }
+  .doc-sub { font-family: Arial, sans-serif; font-size: 10px; text-align: center; color: #888; margin-bottom: 28px; letter-spacing: 1.5px; text-transform: uppercase; }
+  .meta { width: 100%; border-collapse: collapse; margin-bottom: 26px; font-family: Arial, sans-serif; font-size: 12px; }
+  .meta td { padding: 5px 0; }
   .meta td.label { color: #888; width: 140px; text-transform: uppercase; letter-spacing: 0.5px; font-size: 10px; }
   .meta td.value { font-weight: 600; color: #1a1a1a; }
-  table.results { width: 100%; border-collapse: collapse; font-family: Arial, sans-serif; font-size: 12px; margin-bottom: 28px; }
-  table.results th { text-align: left; background: #F3F5F4; padding: 10px 12px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: #555; border-bottom: 2px solid #155830; }
+  table.results { width: 100%; border-collapse: collapse; font-family: Arial, sans-serif; font-size: 12px; margin-bottom: 4px; }
+  table.results th { text-align: left; background: #F3F5F4; padding: 10px 12px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: #555; border-bottom: 1px solid #1a1a1a; }
   table.results td { padding: 10px 12px; border-bottom: 1px solid #e5e5e5; }
   table.results td.num { font-family: 'Courier New', monospace; }
   table.results td.status { font-weight: 700; letter-spacing: 0.5px; }
   table.results td.status.pass { color: #2E9E5B; }
   table.results td.status.fail { color: #D1453B; }
   table.results td.status.neutral { color: #8A8F98; }
-  .overall { font-family: Arial, sans-serif; text-align: center; margin: 36px 0; }
-  .overall .badge { display: inline-block; padding: 10px 32px; border-radius: 4px; font-weight: 800; letter-spacing: 3px; font-size: 16px; }
-  .overall .badge.pass { background: #2E9E5B15; color: #2E9E5B; border: 2px solid #2E9E5B; }
-  .overall .badge.fail { background: #D1453B15; color: #D1453B; border: 2px solid #D1453B; }
-  .overall .badge.neutral { background: #8A8F9815; color: #8A8F98; border: 2px solid #8A8F98; }
-  .footer { margin-top: 60px; font-family: Arial, sans-serif; font-size: 10px; color: #999; display: flex; justify-content: space-between; border-top: 1px solid #eee; padding-top: 14px; }
-  .sig { margin-top: 50px; display: flex; justify-content: space-between; font-family: Arial, sans-serif; font-size: 11px; }
-  .sig div { width: 45%; }
-  .sig .line { border-top: 1px solid #333; margin-top: 40px; padding-top: 6px; color: #666; font-size: 10px; }
-  .disclaimer { margin-top: 18px; font-family: Arial, sans-serif; font-size: 10px; color: #999; text-align: center; font-style: italic; }
+  .conclusion { font-family: Arial, sans-serif; font-size: 11px; text-align: center; margin: 0 0 30px; padding: 16px 0; border-top: 1px solid #1a1a1a; }
+  .conclusion .label { color: #555; text-transform: uppercase; letter-spacing: 1px; font-size: 10px; margin-right: 6px; }
+  .conclusion .value { font-weight: 700; letter-spacing: 1px; }
+  .conclusion .value.pass { color: #2E9E5B; }
+  .conclusion .value.fail { color: #D1453B; }
+  .conclusion .value.neutral { color: #8A8F98; }
+  .disclaimer { font-family: Arial, sans-serif; font-size: 10px; color: #999; text-align: center; font-style: italic; margin-bottom: 40px; }
+  .footer { margin-top: 20px; font-family: Arial, sans-serif; font-size: 10px; color: #999; display: flex; justify-content: space-between; border-top: 1px solid #eee; padding-top: 14px; }
   .print-bar { text-align: center; margin-bottom: 24px; }
   .print-bar button { font-family: Arial, sans-serif; background: #155830; color: #fff; border: none; padding: 10px 22px; border-radius: 6px; font-size: 13px; cursor: pointer; }
   @media print { .print-bar { display: none; } body { padding: 0; } }
@@ -192,8 +191,10 @@ function buildLabReportHTML(test, brandLabel, extras = {}) {
 <body>
   <div class="print-bar"><button onclick="window.print()">Print / Save as PDF</button></div>
 
-  <img class="logo" src="${window.location.origin}/logo-urbnfettch.png" alt="URBNFETTCH — a unit of Sanil Chemicals" />
-  <div class="tagline">${brandLabel.toUpperCase()}</div>
+  <div class="letterhead">
+    <img class="logo" src="${window.location.origin}/logo-urbnfettch.png" alt="URBNFETTCH — a unit of Sanil Chemicals" />
+    <div class="division">${brandLabel}</div>
+  </div>
 
   <hr class="rule" />
 
@@ -218,13 +219,11 @@ function buildLabReportHTML(test, brandLabel, extras = {}) {
     </tbody>
   </table>
 
-  <div class="overall">
-    <div class="badge ${test.overallPass === true ? "pass" : test.overallPass === false ? "fail" : "neutral"}">OVERALL RESULT: ${test.overallPass === true ? "PASS" : test.overallPass === false ? "FAIL" : "RESULTS LOGGED"}</div>
+  <div class="conclusion">
+    <span class="label">Overall Result</span>
+    <span class="value ${test.overallPass === true ? "pass" : test.overallPass === false ? "fail" : "neutral"}">${test.overallPass === true ? "PASS" : test.overallPass === false ? "FAIL" : "RESULTS LOGGED"}</span>
   </div>
 
-  <div class="sig">
-    <div><div class="line">Tested By — ${testedBy || test.by}</div></div>
-  </div>
   <div class="disclaimer">This is a system-generated report and does not require a signature.</div>
 
   <div class="footer">
@@ -2355,14 +2354,12 @@ function LabCard({ test, accent, brandLabel, isBoss, onDelete, onEdit }) {
   const [reportOptionsOpen, setReportOptionsOpen] = useState(false);
   const [customerName, setCustomerName] = useState("");
   const [totalQty, setTotalQty] = useState("");
-  const [testedBy, setTestedBy] = useState(test.by);
   const generateReport = () => {
     const win = window.open("", "_blank");
     if (!win) return;
     win.document.write(buildLabReportHTML(test, brandLabel, {
       customerName: customerName.trim(),
       totalQty: totalQty.trim(),
-      testedBy: isBoss ? testedBy.trim() : test.by,
     }));
     win.document.close();
   };
@@ -2453,13 +2450,6 @@ function LabCard({ test, accent, brandLabel, isBoss, onDelete, onEdit }) {
                 value={totalQty}
                 onChange={(e) => setTotalQty(e.target.value)}
                 className="w-full px-2.5 py-1.5 rounded-lg text-xs border border-zinc-200 bg-white"
-              />
-              <input
-                placeholder="Tested by"
-                value={isBoss ? testedBy : test.by}
-                onChange={(e) => isBoss && setTestedBy(e.target.value)}
-                disabled={!isBoss}
-                className="w-full px-2.5 py-1.5 rounded-lg text-xs border border-zinc-200 bg-white disabled:opacity-60"
               />
               <button
                 onClick={generateReport}
