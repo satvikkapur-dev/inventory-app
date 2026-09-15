@@ -1483,6 +1483,10 @@ function ProductionForm({ accent, name, rawMaterials, containers, finishedGoods,
   const [date, setDate] = useState(editingBatch?.date || todayStr());
   const [machineNumber, setMachineNumber] = useState(editingBatch?.machineNumber || "");
   const [outputQty, setOutputQty] = useState(editingBatch ? String(editingBatch.outputQty) : "");
+  // Once the output qty has an explicit value (typed by hand, restored from
+  // an edit, or copied from a past batch), stop auto-recalculating it from
+  // material rows — only a fresh batch with an untouched field auto-fills.
+  const [outputTouched, setOutputTouched] = useState(!!editingBatch);
   const [outputUnit, setOutputUnit] = useState(editingBatch?.outputUnit || "kg");
   const [containerId, setContainerId] = useState(editingBatch?.containerUsed?.itemId || "");
   const [rows, setRows] = useState(
@@ -1495,6 +1499,19 @@ function ProductionForm({ accent, name, rawMaterials, containers, finishedGoods,
   const addRow = () => setRows([...rows, { id: uid(), itemId: "", qty: "" }]);
   const removeRow = (id) => setRows(rows.filter((r) => r.id !== id));
   const updateRow = (id, patch) => setRows(rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+
+  // Sum of raw material quantities entered so far — the production output
+  // for a blend is normally the total of what went in.
+  const materialsTotal = round2(rows.reduce((s, r) => s + (Number(r.qty) || 0), 0));
+
+  useEffect(() => {
+    if (!outputTouched) setOutputQty(materialsTotal > 0 ? String(materialsTotal) : "");
+  }, [materialsTotal, outputTouched]);
+
+  const outputQtyChanged = (v) => {
+    setOutputQty(v);
+    setOutputTouched(v.trim() !== "");
+  };
 
   const selectedContainer = containers.find((c) => c.id === containerId);
   const unitsNeeded = selectedContainer && outputQty ? Math.ceil(Number(outputQty) / selectedContainer.capacityKg) : 0;
@@ -1531,6 +1548,7 @@ function ProductionForm({ accent, name, rawMaterials, containers, finishedGoods,
     if (!lastMatchingBatch) return;
     setMachineNumber(lastMatchingBatch.machineNumber || "");
     setOutputQty(String(lastMatchingBatch.outputQty));
+    setOutputTouched(true);
     setOutputUnit(lastMatchingBatch.outputUnit || "kg");
     setContainerId(lastMatchingBatch.containerUsed?.itemId || "");
     setRows(
@@ -1605,11 +1623,21 @@ function ProductionForm({ accent, name, rawMaterials, containers, finishedGoods,
         <input placeholder="Batch number" value={batchNumber} onChange={(e) => setBatchNumber(e.target.value)} className={inputCls} />
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} />
         <input placeholder="Machine number" value={machineNumber} onChange={(e) => setMachineNumber(e.target.value)} className={inputCls} />
-        <div className="flex gap-2">
-          <input placeholder="Output qty" type="number" value={outputQty} onChange={(e) => setOutputQty(e.target.value)} className={inputCls} />
-          <select value={outputUnit} onChange={(e) => setOutputUnit(e.target.value)} className={inputCls} style={{ maxWidth: "5.5rem" }}>
-            {UNITS.map((u) => <option key={u}>{u}</option>)}
-          </select>
+        <div>
+          <div className="flex gap-2">
+            <input placeholder="Output qty" type="number" value={outputQty} onChange={(e) => outputQtyChanged(e.target.value)} className={inputCls} />
+            <select value={outputUnit} onChange={(e) => setOutputUnit(e.target.value)} className={inputCls} style={{ maxWidth: "5.5rem" }}>
+              {UNITS.map((u) => <option key={u}>{u}</option>)}
+            </select>
+          </div>
+          {!outputTouched && materialsTotal > 0 && (
+            <p className="text-[10px] text-zinc-400 mt-1">Auto-calculated from materials total.</p>
+          )}
+          {outputTouched && materialsTotal > 0 && outputQty.trim() !== String(materialsTotal) && (
+            <button onClick={() => setOutputTouched(false)} className="text-[10px] mt-1" style={{ color: accent }}>
+              Use materials total ({fmtQty(materialsTotal)}{outputUnit})
+            </button>
+          )}
         </div>
         <div className="col-span-2">
           <select value={containerId} onChange={(e) => setContainerId(e.target.value)} className={inputCls}>
