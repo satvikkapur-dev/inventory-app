@@ -41,7 +41,7 @@ const BRANDS = {
 
 const CATEGORIES = ["Raw material", "Packaging", "Finished good"];
 const UNITS = ["g", "kg", "ml", "L", "units", "drums", "cartons"];
-const LABOR_RATE = 0.15;
+const DEFAULT_OVERHEAD_PERCENT = 15;
 const GST_RATE = 0.18;
 const SECRETARY_WEBHOOK_URL =
   import.meta.env.VITE_SECRETARY_WEBHOOK_URL || "https://hook.eu1.make.com/m9bnpoy9pomx5l87uv2g8kkgkze78858";
@@ -422,6 +422,18 @@ function addStockInLot(item, qty, price) {
   return { qty: newQty, lots };
 }
 
+// Labor/overhead for a batch, either as a percentage of its material cost
+// or a flat ₹/kg of output — whichever the batch was logged with. Batches
+// from before this was configurable have neither field set, so they fall
+// back to the old fixed 15% behavior rather than silently recosting.
+function computeLaborCost(batch, materialCost) {
+  if (batch.overheadMode === "perKg") {
+    return (batch.overheadValue || 0) * (batch.outputQty || 0);
+  }
+  const percent = batch.overheadValue != null ? batch.overheadValue : DEFAULT_OVERHEAD_PERCENT;
+  return materialCost * (percent / 100);
+}
+
 // Applies a production batch's stock effects (consumes raw materials +
 // container, produces the finished good) against plain items/sharedItems
 // arrays and returns the updated arrays plus the finalized batch record
@@ -486,7 +498,7 @@ function applyBatchStock(batch, items, sharedItems, actorName, editTag) {
     }
   }
 
-  const laborCost = materialCost * LABOR_RATE;
+  const laborCost = computeLaborCost(batch, materialCost);
   const canCost = containerUsed ? containerUsed.cost : 0;
   const totalCost = materialCost + laborCost + canCost;
   const costPerKg = batch.outputQty > 0 ? totalCost / batch.outputQty : 0;
@@ -1521,7 +1533,7 @@ function BulkImportForm({ accent, name, onImport, onClose }) {
   );
 }
 
-function ProductionForm({ accent, name, rawMaterials, containers, finishedGoods, batches, editingBatch, onSubmit, onClose }) {
+function ProductionForm({ accent, name, rawMaterials, containers, finishedGoods, batches, canViewCosting, editingBatch, onSubmit, onClose }) {
   const [productName, setProductName] = useState(editingBatch?.productName || "");
   const [batchNumber, setBatchNumber] = useState(editingBatch?.batchNumber || "");
   const [date, setDate] = useState(editingBatch?.date || todayStr());
@@ -1533,6 +1545,10 @@ function ProductionForm({ accent, name, rawMaterials, containers, finishedGoods,
   const [outputTouched, setOutputTouched] = useState(!!editingBatch);
   const [outputUnit, setOutputUnit] = useState(editingBatch?.outputUnit || "kg");
   const [containerId, setContainerId] = useState(editingBatch?.containerUsed?.itemId || "");
+  const [overheadMode, setOverheadMode] = useState(editingBatch?.overheadMode || "percent");
+  const [overheadValue, setOverheadValue] = useState(
+    editingBatch?.overheadValue != null ? String(editingBatch.overheadValue) : String(DEFAULT_OVERHEAD_PERCENT)
+  );
   const [rows, setRows] = useState(
     editingBatch && editingBatch.materials.length > 0
       ? editingBatch.materials.map((m) => ({ id: uid(), itemId: m.itemId, qty: String(m.qty) }))
@@ -1595,6 +1611,10 @@ function ProductionForm({ accent, name, rawMaterials, containers, finishedGoods,
     setOutputTouched(true);
     setOutputUnit(lastMatchingBatch.outputUnit || "kg");
     setContainerId(lastMatchingBatch.containerUsed?.itemId || "");
+    setOverheadMode(lastMatchingBatch.overheadMode || "percent");
+    setOverheadValue(
+      lastMatchingBatch.overheadValue != null ? String(lastMatchingBatch.overheadValue) : String(DEFAULT_OVERHEAD_PERCENT)
+    );
     setRows(
       lastMatchingBatch.materials.length > 0
         ? lastMatchingBatch.materials.map((m) => ({ id: uid(), itemId: m.itemId, qty: String(m.qty) }))
@@ -1624,6 +1644,8 @@ function ProductionForm({ accent, name, rawMaterials, containers, finishedGoods,
       outputUnit,
       materials,
       containerId: containerId || null,
+      overheadMode,
+      overheadValue: Number(overheadValue) || 0,
       by: editingBatch ? editingBatch.by : name,
       createdAt: editingBatch ? editingBatch.createdAt : new Date().toISOString(),
     });
@@ -1699,6 +1721,40 @@ function ProductionForm({ accent, name, rawMaterials, containers, finishedGoods,
             </p>
           )}
         </div>
+
+        {canViewCosting && (
+          <div className="col-span-2">
+            <div className="text-[10px] uppercase tracking-wide text-zinc-400 mb-1.5">Labor / overhead</div>
+            <div className="flex gap-2">
+              <div className="flex gap-1 shrink-0">
+                {[{ key: "percent", label: "% of material" }, { key: "perKg", label: `₹/${outputUnit}` }].map((o) => (
+                  <button
+                    key={o.key}
+                    onClick={() => {
+                      setOverheadMode(o.key);
+                      setOverheadValue(o.key === "percent" ? String(DEFAULT_OVERHEAD_PERCENT) : "");
+                    }}
+                    className="px-2.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap"
+                    style={{
+                      background: overheadMode === o.key ? accent : "transparent",
+                      color: overheadMode === o.key ? "#ffffff" : "#6B7280",
+                      border: overheadMode === o.key ? "none" : "1px solid #00000014",
+                    }}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+              <input
+                placeholder={overheadMode === "perKg" ? `₹ per ${outputUnit}` : "%"}
+                type="number"
+                value={overheadValue}
+                onChange={(e) => setOverheadValue(e.target.value)}
+                className={inputCls + " flex-1"}
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="mt-3">
@@ -1864,7 +1920,10 @@ function ProductionCard({ batch, accent, isBoss, canViewCosting, canEditProducti
               <div className="text-[10px] uppercase tracking-wide text-zinc-400 mb-1.5">Costing</div>
               <div className="space-y-1 text-xs text-zinc-600">
                 <div className="flex justify-between"><span>Material cost (FIFO)</span><span className="mono-font">₹{materialCost.toFixed(2)}</span></div>
-                <div className="flex justify-between"><span>Labor (15%)</span><span className="mono-font">₹{laborCost.toFixed(2)}</span></div>
+                <div className="flex justify-between">
+                  <span>Labor / overhead ({batch.overheadMode === "perKg" ? `₹${batch.overheadValue ?? DEFAULT_OVERHEAD_PERCENT}/${batch.outputUnit || "kg"}` : `${batch.overheadValue ?? DEFAULT_OVERHEAD_PERCENT}%`})</span>
+                  <span className="mono-font">₹{laborCost.toFixed(2)}</span>
+                </div>
                 <div className="flex justify-between"><span>Can / packaging</span><span className="mono-font">₹{canCost.toFixed(2)}</span></div>
                 <div className="flex justify-between font-semibold text-zinc-800 pt-1" style={{ borderTop: "1px solid #00000010" }}>
                   <span>Total cost</span><span className="mono-font">₹{totalCost.toFixed(2)}</span>
@@ -3419,7 +3478,7 @@ function AuthenticatedApp() {
           prices[m.itemId] != null ? { ...m, unitCostUsed: prices[m.itemId] } : m
         );
         const materialCost = materials.reduce((s, m) => s + m.qty * (m.unitCostUsed || 0), 0);
-        const laborCost = materialCost * LABOR_RATE;
+        const laborCost = computeLaborCost(b, materialCost);
         const canCost = b.costing?.canCost || 0;
         const totalCost = materialCost + laborCost + canCost;
         const costPerKg = b.outputQty > 0 ? totalCost / b.outputQty : 0;
@@ -3782,6 +3841,7 @@ function AuthenticatedApp() {
                 containers={containers}
                 finishedGoods={finishedGoods}
                 batches={batches}
+                canViewCosting={canViewCosting}
                 editingBatch={editingBatch}
                 onClose={() => { setShowProdForm(false); setEditingBatch(null); }}
                 onSubmit={editingBatch ? updateBatch : logProduction}
