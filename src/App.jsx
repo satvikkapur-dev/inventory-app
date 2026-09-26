@@ -158,7 +158,7 @@ function buildLabReportHTML(test, brandLabel, extras = {}) {
   * { box-sizing: border-box; }
   body { font-family: Georgia, 'Times New Roman', serif; color: #1a1a1a; margin: 0; padding: 40px; }
   .letterhead { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-  .logo { height: 44px; display: block; }
+  .logo { height: 72px; display: block; }
   .division { font-family: Arial, sans-serif; font-size: 10px; font-weight: 700; color: #4B5563; letter-spacing: 1.5px; text-transform: uppercase; }
   .rule { border: none; border-top: 1px solid #155830; margin: 0 0 20px; }
   .doc-title { font-family: Arial, sans-serif; font-size: 14px; font-weight: 700; letter-spacing: 2px; text-align: center; margin: 20px 0 4px; text-transform: uppercase; color: #1a1a1a; }
