@@ -6,7 +6,7 @@ import {
   Plus, Package, AlertTriangle, Trash2, X, ChevronDown, ChevronUp,
   Truck, Clock, ArrowDownCircle, ArrowUpCircle, RotateCcw, User, History as HistoryIcon,
   Shield, LogIn, Pencil, Factory, UploadCloud, Layers, ShoppingCart, LayoutDashboard, TrendingUp,
-  FlaskConical, CheckCircle2, XCircle, Download, ClipboardList, ClipboardCheck, CalendarClock,
+  FlaskConical, CheckCircle2, XCircle, Download, ClipboardList, CalendarClock,
   Inbox, MinusCircle, MessageCircle, Send, Bot,
 } from "lucide-react";
 import {
@@ -3135,106 +3135,6 @@ function Dashboard({ meta, items, batches, sales, canViewCosting }) {
   );
 }
 
-function ProductionPlanning({ accent, orders, items, isBoss, onUpdateStatus, onDelete }) {
-  const active = orders.filter((o) => o.status !== "completed");
-
-  const groups = {};
-  active.forEach((o) => {
-    getOrderItems(o).forEach((item) => {
-      const key = normName(item.productName);
-      if (!groups[key]) groups[key] = { productName: item.productName, unit: item.unit, totalQty: 0, dueDate: null, orders: [] };
-      groups[key].totalQty += item.qty;
-      if (!groups[key].orders.some((x) => x.id === o.id)) groups[key].orders.push(o);
-      if (o.dueDate && (!groups[key].dueDate || o.dueDate < groups[key].dueDate)) groups[key].dueDate = o.dueDate;
-    });
-  });
-
-  const rows = Object.values(groups).map((g) => {
-    const stockItem = items.find(
-      (i) => i.category === "Finished good" && normName(i.name) === normName(g.productName)
-    );
-    const available = stockItem ? stockItem.qty : 0;
-    const shortfall = Math.max(0, g.totalQty - available);
-    return { ...g, available, shortfall };
-  }).sort((a, b) => {
-    if (a.shortfall !== b.shortfall) return b.shortfall - a.shortfall;
-    if (a.dueDate && b.dueDate) return a.dueDate < b.dueDate ? -1 : 1;
-    if (a.dueDate) return -1;
-    if (b.dueDate) return 1;
-    return 0;
-  });
-
-  const queue = [...active].sort((a, b) => {
-    if (a.dueDate && b.dueDate) return a.dueDate < b.dueDate ? -1 : 1;
-    if (a.dueDate) return -1;
-    if (b.dueDate) return 1;
-    return new Date(a.createdAt) - new Date(b.createdAt);
-  });
-
-  const cardStyle = { background: "#FFFFFF", border: "1px solid #00000014" };
-
-  return (
-    <div className="space-y-3">
-      <div className="rounded-xl p-4" style={cardStyle}>
-        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-zinc-400 mb-2">
-          <ClipboardCheck size={12} /> Needs production
-        </div>
-        {rows.length === 0 ? (
-          <p className="text-xs text-zinc-400 py-2">No open orders — nothing queued for production.</p>
-        ) : (
-          <div className="space-y-2.5">
-            {rows.map((g) => {
-              const dLeft = daysUntil(g.dueDate);
-              const overdue = dLeft != null && dLeft < 0;
-              return (
-                <div key={g.productName} className="rounded-lg px-3 py-2.5" style={{ background: "#F7F8F7" }}>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-zinc-900">{g.productName}</span>
-                    {g.shortfall > 0 ? (
-                      <span className="text-xs font-semibold" style={{ color: "#D1453B" }}>
-                        Produce {g.shortfall}{g.unit}
-                      </span>
-                    ) : (
-                      <span className="text-xs font-semibold" style={{ color: "#2E9E5B" }}>Stock covers it</span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-3 mt-1 text-[11px] text-zinc-500">
-                    <span>Ordered: {g.totalQty}{g.unit}</span>
-                    <span>In stock: {g.available}{g.unit}</span>
-                    {g.dueDate && (
-                      <span style={{ color: overdue ? "#D1453B" : "#6B7280" }}>
-                        {overdue ? `${Math.abs(dLeft)}d overdue` : `Due ${g.dueDate}`}
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-[10px] text-zinc-400 mt-1">
-                    {g.orders.length} order{g.orders.length > 1 ? "s" : ""}: {g.orders.map((o) => o.customerName).join(", ")}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      <div className="rounded-xl p-4" style={cardStyle}>
-        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-zinc-400 mb-2">
-          <ClipboardList size={12} /> Order queue
-        </div>
-        {queue.length === 0 ? (
-          <p className="text-xs text-zinc-400 py-2">No open orders.</p>
-        ) : (
-          <div className="space-y-2">
-            {queue.map((o) => (
-              <OrderCard key={o.id} order={o} accent={accent} isBoss={isBoss} onUpdateStatus={onUpdateStatus} onDelete={onDelete} />
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 function SecretaryWidget({ name, accent }) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState([
@@ -3400,7 +3300,6 @@ function AuthenticatedApp() {
     dashboard: { label: "Dashboard", icon: LayoutDashboard },
     items: { label: "Items", icon: Package },
     orders: { label: "Orders", icon: ClipboardList },
-    planning: { label: "Production Planning", icon: ClipboardCheck },
     production: { label: "Production", icon: Factory },
     sales: { label: "Sales", icon: ShoppingCart },
     lab: { label: canSeeLabTab ? "Lab" : "Samples", icon: canSeeLabTab ? FlaskConical : Inbox },
@@ -3413,7 +3312,7 @@ function AuthenticatedApp() {
     ? [{ key: "orders", label: "Orders", icon: ClipboardList, tabs: ["orders"] }]
     : [
         ...(isBoss ? [{ key: "dashboard", label: "Dashboard", icon: LayoutDashboard, tabs: ["dashboard"] }] : []),
-        { key: "operations", label: "Operations", icon: Layers, tabs: ["orders", "items", "planning", "production"] },
+        { key: "operations", label: "Operations", icon: Layers, tabs: ["orders", "items", "production"] },
         { key: "sales", label: "Sales", icon: ShoppingCart, tabs: ["sales"] },
         ...(canSeeLabTab || samplesOnly ? [{ key: "lab", label: TAB_META.lab.label, icon: TAB_META.lab.icon, tabs: ["lab"] }] : []),
         { key: "records", label: "Records", icon: HistoryIcon, tabs: isBoss ? ["history", "logins"] : ["history"] },
@@ -3940,15 +3839,6 @@ function AuthenticatedApp() {
               ))}
             </div>
           </>
-        ) : tab === "planning" ? (
-          <ProductionPlanning
-            accent={meta.accent}
-            orders={orders}
-            items={combined}
-            isBoss={isBoss}
-            onUpdateStatus={updateOrderStatus}
-            onDelete={deleteOrder}
-          />
         ) : tab === "production" ? (
           <>
             {(showProdForm || editingBatch) && (
