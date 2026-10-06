@@ -615,7 +615,7 @@ function reverseBatchStock(batch, items, sharedItems, actorName, editTag) {
 // item actually changed. Collapses any pair of entries tagged with the same
 // editTag into one net "Adjusted" entry, so the log reads as one real
 // change instead of edit-mechanics noise.
-function collapseEditHistory(list, editTag, batchNumber) {
+function collapseEditHistory(list, editTag, noteSuffix) {
   return list.map((item) => {
     if (item.history.length < 2) return item;
     const [top, second, ...rest] = item.history;
@@ -628,7 +628,7 @@ function collapseEditHistory(list, editTag, batchNumber) {
       type: net > 0 ? "in" : "out",
       qty: Math.abs(net),
       date: top.date,
-      note: `Adjusted — batch ${batchNumber} (edited)`,
+      note: `Adjusted — ${noteSuffix} (edited)`,
       by: top.by,
       balance: top.balance,
     };
@@ -1963,12 +1963,26 @@ function ProductionCard({ batch, accent, isBoss, canViewCosting, canEditProducti
   );
 }
 
-function SalesForm({ accent, name, finishedGoods, onSubmit, onClose }) {
-  const [customerName, setCustomerName] = useState("");
-  const [productId, setProductId] = useState("");
-  const [qty, setQty] = useState("");
-  const [pricePerUnit, setPricePerUnit] = useState("");
-  const [date, setDate] = useState(todayStr());
+function SalesForm({ accent, name, finishedGoods, batches, editingSale, onSubmit, onClose }) {
+  const [customerName, setCustomerName] = useState(editingSale?.customerName || "");
+  const [productId, setProductId] = useState(editingSale?.productId || "");
+  const [qty, setQty] = useState(editingSale ? String(editingSale.qty) : "");
+  const [pricePerUnit, setPricePerUnit] = useState(editingSale ? String(editingSale.pricePerUnit) : "");
+  const [batchNumber, setBatchNumber] = useState(editingSale?.batchNumber || "");
+  const [date, setDate] = useState(editingSale?.date || todayStr());
+
+  const selectedProduct = finishedGoods.find((p) => p.id === productId);
+  // Suggests batch numbers from production of the selected product, most
+  // recent first, so "which batch was this sold from" can be picked rather
+  // than remembered — still free text since stock isn't lot-tracked.
+  const batchOptions = useMemo(() => {
+    if (!selectedProduct) return [];
+    const key = normName(selectedProduct.name);
+    return (batches || [])
+      .filter((b) => normName(b.productName) === key)
+      .sort((a, b) => new Date(b.createdAt || b.date) - new Date(a.createdAt || a.date))
+      .map((b) => b.batchNumber);
+  }, [batches, selectedProduct]);
 
   const submit = () => {
     const product = finishedGoods.find((p) => p.id === productId);
@@ -1976,7 +1990,7 @@ function SalesForm({ accent, name, finishedGoods, onSubmit, onClose }) {
     const q = Number(qty);
     const price = Number(pricePerUnit);
     onSubmit({
-      id: uid(),
+      id: editingSale ? editingSale.id : uid(),
       customerName: customerName.trim(),
       productId: product.id,
       productName: product.name,
@@ -1984,9 +1998,10 @@ function SalesForm({ accent, name, finishedGoods, onSubmit, onClose }) {
       unit: product.unit,
       pricePerUnit: price,
       totalAmount: q * price,
+      batchNumber: batchNumber.trim() || null,
       date,
-      by: name,
-      createdAt: new Date().toISOString(),
+      by: editingSale ? editingSale.by : name,
+      createdAt: editingSale ? editingSale.createdAt : new Date().toISOString(),
     });
     onClose();
   };
@@ -1994,7 +2009,7 @@ function SalesForm({ accent, name, finishedGoods, onSubmit, onClose }) {
   return (
     <div className="rounded-xl p-4 mb-3" style={{ background: "#F3F5F4", border: "1px solid #00000012" }}>
       <div className="flex justify-between items-center mb-3">
-        <span className="text-sm font-semibold tracking-wide" style={{ color: accent }}>NEW SALE</span>
+        <span className="text-sm font-semibold tracking-wide" style={{ color: accent }}>{editingSale ? "EDIT SALE" : "NEW SALE"}</span>
         <button onClick={onClose} aria-label="Close form"><X size={16} className="text-zinc-400" /></button>
       </div>
       <div className="grid grid-cols-2 gap-2">
@@ -2012,27 +2027,44 @@ function SalesForm({ accent, name, finishedGoods, onSubmit, onClose }) {
         )}
         <input placeholder="Qty sold" type="number" value={qty} onChange={(e) => setQty(e.target.value)} className={inputCls} />
         <input placeholder="Price per unit (₹)" type="number" value={pricePerUnit} onChange={(e) => setPricePerUnit(e.target.value)} className={inputCls} />
+        <div className="col-span-2">
+          <input placeholder="Batch number sold (optional)" list="sales-batch-numbers" value={batchNumber} onChange={(e) => setBatchNumber(e.target.value)} className={inputCls} />
+          <datalist id="sales-batch-numbers">
+            {batchOptions.map((b) => <option key={b} value={b} />)}
+          </datalist>
+        </div>
         <div className="col-span-2"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} /></div>
       </div>
       <button onClick={submit} className="mt-3 w-full rounded-lg py-2 text-sm font-semibold" style={{ background: accent, color: "#ffffff" }}>
-        Log sale &amp; deduct stock
+        {editingSale ? "Save changes & update stock" : "Log sale & deduct stock"}
       </button>
     </div>
   );
 }
 
-function SampleIssueForm({ accent, name, finishedGoods, onSubmit, onClose }) {
-  const [recipient, setRecipient] = useState("");
-  const [productId, setProductId] = useState("");
-  const [qty, setQty] = useState("");
-  const [date, setDate] = useState(todayStr());
+function SampleIssueForm({ accent, name, finishedGoods, batches, editingSale, onSubmit, onClose }) {
+  const [recipient, setRecipient] = useState(editingSale?.customerName || "");
+  const [productId, setProductId] = useState(editingSale?.productId || "");
+  const [qty, setQty] = useState(editingSale ? String(editingSale.qty) : "");
+  const [batchNumber, setBatchNumber] = useState(editingSale?.batchNumber || "");
+  const [date, setDate] = useState(editingSale?.date || todayStr());
+
+  const selectedProduct = finishedGoods.find((p) => p.id === productId);
+  const batchOptions = useMemo(() => {
+    if (!selectedProduct) return [];
+    const key = normName(selectedProduct.name);
+    return (batches || [])
+      .filter((b) => normName(b.productName) === key)
+      .sort((a, b) => new Date(b.createdAt || b.date) - new Date(a.createdAt || a.date))
+      .map((b) => b.batchNumber);
+  }, [batches, selectedProduct]);
 
   const submit = () => {
     const product = finishedGoods.find((p) => p.id === productId);
     if (!recipient.trim() || !product || !qty) return;
     const q = Number(qty);
     onSubmit({
-      id: uid(),
+      id: editingSale ? editingSale.id : uid(),
       type: "sample",
       customerName: recipient.trim(),
       productId: product.id,
@@ -2041,9 +2073,10 @@ function SampleIssueForm({ accent, name, finishedGoods, onSubmit, onClose }) {
       unit: product.unit,
       pricePerUnit: 0,
       totalAmount: 0,
+      batchNumber: batchNumber.trim() || null,
       date,
-      by: name,
-      createdAt: new Date().toISOString(),
+      by: editingSale ? editingSale.by : name,
+      createdAt: editingSale ? editingSale.createdAt : new Date().toISOString(),
     });
     onClose();
   };
@@ -2051,7 +2084,7 @@ function SampleIssueForm({ accent, name, finishedGoods, onSubmit, onClose }) {
   return (
     <div className="rounded-xl p-4 mb-3" style={{ background: "#F3F5F4", border: "1px solid #00000012" }}>
       <div className="flex justify-between items-center mb-3">
-        <span className="text-sm font-semibold tracking-wide" style={{ color: accent }}>ISSUE SAMPLE</span>
+        <span className="text-sm font-semibold tracking-wide" style={{ color: accent }}>{editingSale ? "EDIT SAMPLE ISSUE" : "ISSUE SAMPLE"}</span>
         <button onClick={onClose} aria-label="Close form"><X size={16} className="text-zinc-400" /></button>
       </div>
       <div className="grid grid-cols-2 gap-2">
@@ -2068,16 +2101,22 @@ function SampleIssueForm({ accent, name, finishedGoods, onSubmit, onClose }) {
           <p className="col-span-2 text-xs text-zinc-500">No finished goods yet — log a production batch first.</p>
         )}
         <div className="col-span-2"><input placeholder="Sample qty (e.g. 0.5 for 500g, if unit is kg)" type="number" value={qty} onChange={(e) => setQty(e.target.value)} className={inputCls} /></div>
+        <div className="col-span-2">
+          <input placeholder="Batch number issued (optional)" list="sample-issue-batch-numbers" value={batchNumber} onChange={(e) => setBatchNumber(e.target.value)} className={inputCls} />
+          <datalist id="sample-issue-batch-numbers">
+            {batchOptions.map((b) => <option key={b} value={b} />)}
+          </datalist>
+        </div>
         <div className="col-span-2"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} /></div>
       </div>
       <button onClick={submit} className="mt-3 w-full rounded-lg py-2 text-sm font-semibold" style={{ background: accent, color: "#ffffff" }}>
-        Issue sample &amp; deduct stock
+        {editingSale ? "Save changes & update stock" : "Issue sample & deduct stock"}
       </button>
     </div>
   );
 }
 
-function SalesCard({ sale, accent, isBoss, onDelete }) {
+function SalesCard({ sale, accent, isBoss, onEdit, onDelete }) {
   const [open, setOpen] = useState(false);
   const isSample = sale.type === "sample";
   return (
@@ -2086,7 +2125,9 @@ function SalesCard({ sale, accent, isBoss, onDelete }) {
         {isSample ? <FlaskConical size={18} style={{ color: accent }} className="shrink-0" /> : <ShoppingCart size={18} style={{ color: accent }} className="shrink-0" />}
         <div className="min-w-0 flex-1">
           <div className="text-sm font-medium text-zinc-900 truncate">{sale.customerName}</div>
-          <div className="text-xs text-zinc-500 mt-0.5 truncate">{sale.productName} · {fmtQty(sale.qty)}{sale.unit} · {sale.date}</div>
+          <div className="text-xs text-zinc-500 mt-0.5 truncate">
+            {sale.productName} · {fmtQty(sale.qty)}{sale.unit}{sale.batchNumber ? ` · Batch ${sale.batchNumber}` : ""} · {sale.date}
+          </div>
         </div>
         {isSample ? (
           <span className="text-[10px] font-semibold px-2 py-1 rounded-full shrink-0" style={{ background: `${accent}18`, color: accent }}>SAMPLE</span>
@@ -2100,6 +2141,9 @@ function SalesCard({ sale, accent, isBoss, onDelete }) {
           <div className="mt-3 space-y-1 text-xs text-zinc-600">
             {!isSample && <div className="flex justify-between"><span>Price per {sale.unit}</span><span className="mono-font">₹{sale.pricePerUnit}</span></div>}
             <div className="flex justify-between"><span>Quantity</span><span className="mono-font">{fmtQty(sale.qty)}{sale.unit}</span></div>
+            {sale.batchNumber && (
+              <div className="flex justify-between"><span>Batch number</span><span className="mono-font">{sale.batchNumber}</span></div>
+            )}
             {!isSample && (
               <div className="flex justify-between font-semibold text-zinc-800 pt-1" style={{ borderTop: "1px solid #00000010" }}>
                 <span>Total</span><span className="mono-font">₹{sale.totalAmount.toFixed(2)}</span>
@@ -2108,12 +2152,20 @@ function SalesCard({ sale, accent, isBoss, onDelete }) {
           </div>
           <div className="text-[10px] text-zinc-400 flex items-center gap-1 mt-3">
             <User size={9} /> Logged by {sale.by} · {fmtDate(sale.createdAt)}
+            {sale.editedBy && ` · edited by ${sale.editedBy} · ${fmtDate(sale.editedAt)}`}
           </div>
-          {isBoss && (
-            <button onClick={() => onDelete(sale.id)} className="mt-3 flex items-center gap-1.5 text-xs text-zinc-400">
-              <Trash2 size={12} /> Remove log entry (stock changes stay as-is)
-            </button>
-          )}
+          <div className="mt-3 flex items-center gap-4">
+            {isBoss && (
+              <button onClick={() => onEdit(sale)} className="flex items-center gap-1.5 text-xs text-zinc-500">
+                <Pencil size={12} /> Edit
+              </button>
+            )}
+            {isBoss && (
+              <button onClick={() => onDelete(sale.id)} className="flex items-center gap-1.5 text-xs text-zinc-400">
+                <Trash2 size={12} /> Remove log entry (stock changes stay as-is)
+              </button>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -2597,30 +2649,29 @@ function LabCard({ test, accent, brandLabel, isBoss, onDelete, onEdit }) {
   );
 }
 
-function SampleForm({ accent, name, onSubmit, onClose }) {
-  const [source, setSource] = useState("");
-  const [description, setDescription] = useState("");
-  const [qty, setQty] = useState("");
-  const [unit, setUnit] = useState("g");
-  const [dateReceived, setDateReceived] = useState(todayStr());
-  const [notes, setNotes] = useState("");
+function SampleForm({ accent, name, editingSample, onSubmit, onClose }) {
+  const [source, setSource] = useState(editingSample?.source || "");
+  const [description, setDescription] = useState(editingSample?.description || "");
+  const [qty, setQty] = useState(editingSample ? String(editingSample.qtyReceived) : "");
+  const [unit, setUnit] = useState(editingSample?.unit || "g");
+  const [dateReceived, setDateReceived] = useState(editingSample?.dateReceived || todayStr());
+  const [notes, setNotes] = useState(editingSample?.notes || "");
 
   const submit = () => {
     if (!source.trim() || !description.trim() || !qty) return;
     const q = Number(qty);
     onSubmit({
-      id: uid(),
+      id: editingSample ? editingSample.id : uid(),
       source: source.trim(),
       description: description.trim(),
       qtyReceived: q,
-      qtyRemaining: q,
       unit,
       dateReceived,
       notes: notes.trim(),
-      status: "received",
-      history: [],
-      by: name,
-      createdAt: new Date().toISOString(),
+      status: editingSample ? editingSample.status : "received",
+      history: editingSample ? editingSample.history : [],
+      by: editingSample ? editingSample.by : name,
+      createdAt: editingSample ? editingSample.createdAt : new Date().toISOString(),
     });
     onClose();
   };
@@ -2628,7 +2679,7 @@ function SampleForm({ accent, name, onSubmit, onClose }) {
   return (
     <div className="rounded-xl p-4 mb-3" style={{ background: "#F3F5F4", border: "1px solid #00000012" }}>
       <div className="flex justify-between items-center mb-3">
-        <span className="text-sm font-semibold tracking-wide" style={{ color: accent }}>NEW SAMPLE RECEIVED</span>
+        <span className="text-sm font-semibold tracking-wide" style={{ color: accent }}>{editingSample ? "EDIT SAMPLE RECEIVED" : "NEW SAMPLE RECEIVED"}</span>
         <button onClick={onClose} aria-label="Close form"><X size={16} className="text-zinc-400" /></button>
       </div>
       <div className="grid grid-cols-2 gap-2">
@@ -2640,15 +2691,20 @@ function SampleForm({ accent, name, onSubmit, onClose }) {
         </select>
         <div className="col-span-2"><input type="date" value={dateReceived} onChange={(e) => setDateReceived(e.target.value)} className={inputCls} /></div>
         <div className="col-span-2"><textarea placeholder="Notes (optional)" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className={inputCls + " resize-none"} /></div>
+        {editingSample && (
+          <p className="col-span-2 text-[10px] text-zinc-400">
+            Currently {fmtQty(editingSample.qtyRemaining != null ? editingSample.qtyRemaining : editingSample.qtyReceived)}{editingSample.unit} remaining — changing qty received adjusts what's remaining by the same amount; usage history stays as logged.
+          </p>
+        )}
       </div>
       <button onClick={submit} className="mt-3 w-full rounded-lg py-2 text-sm font-semibold" style={{ background: accent, color: "#ffffff" }}>
-        Log sample
+        {editingSample ? "Save changes" : "Log sample"}
       </button>
     </div>
   );
 }
 
-function SampleCard({ sample, accent, isBoss, onUpdateStatus, onLogUsage, onDelete }) {
+function SampleCard({ sample, accent, isBoss, onUpdateStatus, onLogUsage, onEdit, onDelete }) {
   const [open, setOpen] = useState(false);
   const [useQty, setUseQty] = useState("");
   const [useNote, setUseNote] = useState("");
@@ -2769,11 +2825,18 @@ function SampleCard({ sample, accent, isBoss, onUpdateStatus, onLogUsage, onDele
             ))}
           </div>
 
-          {isBoss && (
-            <button onClick={() => onDelete(sample.id)} className="mt-3 flex items-center gap-1.5 text-xs text-zinc-400">
-              <Trash2 size={12} /> Remove sample record
-            </button>
-          )}
+          <div className="mt-3 flex items-center gap-4">
+            {isBoss && (
+              <button onClick={() => onEdit(sample)} className="flex items-center gap-1.5 text-xs text-zinc-500">
+                <Pencil size={12} /> Edit
+              </button>
+            )}
+            {isBoss && (
+              <button onClick={() => onDelete(sample.id)} className="flex items-center gap-1.5 text-xs text-zinc-400">
+                <Trash2 size={12} /> Remove sample record
+              </button>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -3301,10 +3364,12 @@ function AuthenticatedApp() {
   const [editingBatch, setEditingBatch] = useState(null);
   const [showSalesForm, setShowSalesForm] = useState(false);
   const [showSampleIssueForm, setShowSampleIssueForm] = useState(false);
+  const [editingSale, setEditingSale] = useState(null);
   const [backupState, setBackupState] = useState("idle"); // idle | saving | done | error
   const [showLabForm, setShowLabForm] = useState(false);
   const [editingTest, setEditingTest] = useState(null);
   const [showSampleForm, setShowSampleForm] = useState(false);
+  const [editingSample, setEditingSample] = useState(null);
   const [labSubTab, setLabSubTab] = useState("tests");
   const [showOrderForm, setShowOrderForm] = useState(false);
   const [filter, setFilter] = useState("All");
@@ -3457,8 +3522,8 @@ function AuthenticatedApp() {
     const editTag = uid();
     const { nextItems: reversedItems, nextSharedItems: reversedShared } = reverseBatchStock(original, items, sharedItems, session.name, editTag);
     const { finalBatch, nextItems: appliedItems, nextSharedItems: appliedShared } = applyBatchStock(editedBatch, reversedItems, reversedShared, session.name, editTag);
-    const nextItems = collapseEditHistory(appliedItems, editTag, editedBatch.batchNumber);
-    const nextSharedItems = collapseEditHistory(appliedShared, editTag, editedBatch.batchNumber);
+    const nextItems = collapseEditHistory(appliedItems, editTag, `batch ${editedBatch.batchNumber}`);
+    const nextSharedItems = collapseEditHistory(appliedShared, editTag, `batch ${editedBatch.batchNumber}`);
     const finalBatchWithEditTrail = { ...finalBatch, editedBy: session.name, editedAt: new Date().toISOString() };
 
     save(nextItems);
@@ -3527,6 +3592,49 @@ function AuthenticatedApp() {
     saveSales(sales.filter((s) => s.id !== id));
   };
 
+  // Edits a sale/sample-issue: reverses the original deduction, applies the
+  // edited version's, and collapses any resulting double-entry on the same
+  // item into one net "Adjusted" line — the same reverse+reapply pattern
+  // used for editing a production batch, since the stock math is the same
+  // shape (and finished goods aren't lot-tracked, so no FIFO complexity).
+  const updateSale = (editedSale) => {
+    if (!isBoss) return;
+    const original = sales.find((s) => s.id === editedSale.id);
+    if (!original) return;
+
+    const editTag = uid();
+    const nextItems = [...items];
+    const nextShared = [...sharedItems];
+
+    const mutate = (productId, deltaQty, note) => {
+      const inBrandIdx = nextItems.findIndex((i) => i.id === productId);
+      const inSharedIdx = nextShared.findIndex((i) => i.id === productId);
+      const list = inBrandIdx >= 0 ? nextItems : inSharedIdx >= 0 ? nextShared : null;
+      const idx = inBrandIdx >= 0 ? inBrandIdx : inSharedIdx;
+      if (!list || idx < 0) return;
+      const current = list[idx];
+      const newQty = deltaQty >= 0 ? round2(current.qty + deltaQty) : round2(Math.max(0, current.qty + deltaQty));
+      const updated = {
+        ...current,
+        qty: newQty,
+        history: [
+          { id: uid(), type: deltaQty >= 0 ? "in" : "out", qty: Math.abs(deltaQty), date: new Date().toISOString(), note, by: session.name, balance: newQty, editTag },
+          ...current.history,
+        ],
+      };
+      if (inBrandIdx >= 0) nextItems[idx] = updated;
+      else nextShared[idx] = updated;
+    };
+
+    mutate(original.productId, original.qty, `Reversed — ${original.type === "sample" ? "sample to" : "sale to"} ${original.customerName}`);
+    mutate(editedSale.productId, -editedSale.qty, editedSale.type === "sample" ? `Sample issued to ${editedSale.customerName}` : `Sold to ${editedSale.customerName}`);
+
+    const noteSuffix = editedSale.type === "sample" ? `sample to ${editedSale.customerName}` : `sale to ${editedSale.customerName}`;
+    save(collapseEditHistory(nextItems, editTag, noteSuffix));
+    saveShared(collapseEditHistory(nextShared, editTag, noteSuffix));
+    saveSales(sales.map((s) => (s.id === editedSale.id ? { ...editedSale, editedBy: session.name, editedAt: new Date().toISOString() } : s)));
+  };
+
   const downloadBackup = async () => {
     if (!canBackupData || backupState === "saving") return;
     setBackupState("saving");
@@ -3586,7 +3694,17 @@ function AuthenticatedApp() {
     saveTests(tests.map((t) => (t.id === editedTest.id ? finalTest : t)));
   };
 
-  const addSample = (sample) => saveSamples([sample, ...samples]);
+  const addSample = (sample) => saveSamples([{ ...sample, qtyRemaining: sample.qtyReceived }, ...samples]);
+  // Adjusts qtyRemaining by the same delta as the qty-received correction,
+  // so already-logged usage/issue history isn't reset or disturbed by the edit.
+  const updateSample = (editedSample) => {
+    if (!isBoss) return;
+    const original = samples.find((s) => s.id === editedSample.id);
+    if (!original) return;
+    const oldRemaining = original.qtyRemaining != null ? original.qtyRemaining : original.qtyReceived;
+    const newRemaining = round2(oldRemaining + (editedSample.qtyReceived - original.qtyReceived));
+    saveSamples(samples.map((s) => (s.id === editedSample.id ? { ...editedSample, qtyRemaining: newRemaining } : s)));
+  };
   const updateSampleStatus = (id, status) => saveSamples(samples.map((s) => (s.id === id ? { ...s, status } : s)));
   const logSampleUsage = (id, qty, note, type = "used") => {
     saveSamples(
@@ -3875,32 +3993,36 @@ function AuthenticatedApp() {
             {canIssueSample && (
               <div className="flex justify-end mb-3">
                 <button
-                  onClick={() => { setShowSalesForm(false); setShowSampleIssueForm(true); }}
+                  onClick={() => { setShowSalesForm(false); setEditingSale(null); setShowSampleIssueForm(true); }}
                   className="flex items-center gap-1 text-[11px] text-zinc-500"
                 >
                   <FlaskConical size={13} /> Issue sample
                 </button>
               </div>
             )}
-            {showSalesForm && (
+            {(showSalesForm || (editingSale && editingSale.type !== "sample")) && (
               <SalesForm
                 accent={meta.accent}
                 name={session.name}
                 finishedGoods={finishedGoods}
-                onClose={() => setShowSalesForm(false)}
-                onSubmit={sellStock}
+                batches={batches}
+                editingSale={editingSale && editingSale.type !== "sample" ? editingSale : null}
+                onClose={() => { setShowSalesForm(false); setEditingSale(null); }}
+                onSubmit={editingSale ? updateSale : sellStock}
               />
             )}
-            {showSampleIssueForm && (
+            {(showSampleIssueForm || (editingSale && editingSale.type === "sample")) && (
               <SampleIssueForm
                 accent={meta.accent}
                 name={session.name}
                 finishedGoods={finishedGoods}
-                onClose={() => setShowSampleIssueForm(false)}
-                onSubmit={sellStock}
+                batches={batches}
+                editingSale={editingSale && editingSale.type === "sample" ? editingSale : null}
+                onClose={() => { setShowSampleIssueForm(false); setEditingSale(null); }}
+                onSubmit={editingSale ? updateSale : sellStock}
               />
             )}
-            {sales.length === 0 && !showSalesForm && !showSampleIssueForm && (
+            {sales.length === 0 && !showSalesForm && !showSampleIssueForm && !editingSale && (
               <div className="text-center py-14">
                 <ShoppingCart size={28} className="mx-auto text-zinc-300 mb-2" />
                 <p className="text-sm text-zinc-500">No sales logged yet for {meta.label}.</p>
@@ -3909,7 +4031,7 @@ function AuthenticatedApp() {
             )}
             <div className="space-y-2">
               {sales.map((sale) => (
-                <SalesCard key={sale.id} sale={sale} accent={meta.accent} isBoss={isBoss} onDelete={deleteSale} />
+                <SalesCard key={sale.id} sale={sale} accent={meta.accent} isBoss={isBoss} onEdit={(s) => { setEditingSale(s); setShowSalesForm(false); setShowSampleIssueForm(false); }} onDelete={deleteSale} />
               ))}
             </div>
           </>
@@ -3968,15 +4090,16 @@ function AuthenticatedApp() {
               </>
             ) : (
               <>
-                {showSampleForm && (
+                {(showSampleForm || editingSample) && (
                   <SampleForm
                     accent={meta.accent}
                     name={session.name}
-                    onClose={() => setShowSampleForm(false)}
-                    onSubmit={addSample}
+                    editingSample={editingSample}
+                    onClose={() => { setShowSampleForm(false); setEditingSample(null); }}
+                    onSubmit={editingSample ? updateSample : addSample}
                   />
                 )}
-                {samples.length === 0 && !showSampleForm && (
+                {samples.length === 0 && !showSampleForm && !editingSample && (
                   <div className="text-center py-14">
                     <Inbox size={28} className="mx-auto text-zinc-300 mb-2" />
                     <p className="text-sm text-zinc-500">No incoming samples logged yet for {meta.label}.</p>
@@ -3992,6 +4115,7 @@ function AuthenticatedApp() {
                       isBoss={isBoss}
                       onUpdateStatus={updateSampleStatus}
                       onLogUsage={logSampleUsage}
+                      onEdit={(s) => { setEditingSample(s); setShowSampleForm(false); }}
                       onDelete={deleteSample}
                     />
                   ))}
@@ -4073,7 +4197,7 @@ function AuthenticatedApp() {
 
       {tab === "sales" && (
         <button
-          onClick={() => { setShowSampleIssueForm(false); setShowSalesForm(true); }}
+          onClick={() => { setShowSampleIssueForm(false); setEditingSale(null); setShowSalesForm(true); }}
           className="fixed bottom-6 right-6 w-12 h-12 rounded-full flex items-center justify-center shadow-lg"
           style={{ background: meta.accent }}
           aria-label="Log new sale"
@@ -4086,7 +4210,7 @@ function AuthenticatedApp() {
         <button
           onClick={() => {
             if (labSubTab === "tests") { setEditingTest(null); setShowLabForm(true); }
-            else setShowSampleForm(true);
+            else { setEditingSample(null); setShowSampleForm(true); }
           }}
           className="fixed bottom-6 right-6 w-12 h-12 rounded-full flex items-center justify-center shadow-lg"
           style={{ background: meta.accent }}
