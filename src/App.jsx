@@ -1216,7 +1216,7 @@ function MovementRow({ h, showItem, canViewCosting, unit }) {
   );
 }
 
-function ItemCard({ item, accent, name, isBoss, canViewCosting, canEnterPrice, onUpdate, onDelete }) {
+function ItemCard({ item, accent, name, isBoss, canViewCosting, canEnterPrice, batches, sales, onUpdate, onDelete }) {
   const [open, setOpen] = useState(false);
   const [activeAction, setActiveAction] = useState(null);
   const [moveQty, setMoveQty] = useState("");
@@ -1225,9 +1225,31 @@ function ItemCard({ item, accent, name, isBoss, canViewCosting, canEnterPrice, o
   const [renamingName, setRenamingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(item.name);
   const [showAllHistory, setShowAllHistory] = useState(false);
+  const [showAllBatches, setShowAllBatches] = useState(false);
   const low = item.qty <= item.threshold;
   const pct = item.threshold > 0 ? Math.min(100, (item.qty / (item.threshold * 2)) * 100) : 100;
   const isRawWithLots = item.category === "Raw material" && item.lots && item.lots.length > 0;
+  const isFinishedGood = item.category === "Finished good";
+
+  // For a finished good, reconstructs — per production batch that made it —
+  // how big that batch was and, from sales/sample-issues that logged the
+  // same batch number, roughly where it went. Not a hard FIFO truth (sales
+  // without a batch number logged aren't attributed to any batch), so this
+  // is presented as an estimate, not an audited trail.
+  const itemBatches = useMemo(() => {
+    if (!isFinishedGood) return [];
+    const key = normName(item.name);
+    return (batches || [])
+      .filter((b) => normName(b.productName) === key)
+      .map((b) => {
+        const taggedSales = (sales || []).filter(
+          (s) => normName(s.productName) === key && s.batchNumber && normName(s.batchNumber) === normName(b.batchNumber)
+        );
+        const totalTagged = round2(taggedSales.reduce((sum, s) => sum + s.qty, 0));
+        return { ...b, taggedSales, totalTagged, remaining: round2(b.outputQty - totalTagged) };
+      })
+      .sort((a, b) => new Date(b.createdAt || b.date) - new Date(a.createdAt || a.date));
+  }, [batches, sales, item.name, isFinishedGood]);
 
   const move = (type) => {
     const q = Number(moveQty);
@@ -1346,6 +1368,46 @@ function ItemCard({ item, accent, name, isBoss, canViewCosting, canEnterPrice, o
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {isFinishedGood && itemBatches.length > 0 && (
+            <div className="mt-3 rounded-lg px-3 py-2" style={{ background: "#F7F8F7" }}>
+              <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-zinc-400 mb-1.5"><Layers size={11} /> Batches</div>
+              <div className="space-y-2.5">
+                {(showAllBatches ? itemBatches : itemBatches.slice(0, 5)).map((b) => (
+                  <div key={b.id} className="text-xs">
+                    <div className="flex justify-between items-baseline">
+                      <span className="font-medium text-zinc-800">Batch {b.batchNumber}</span>
+                      <span className="text-[10px] text-zinc-400">{b.date}</span>
+                    </div>
+                    <div className="flex justify-between text-zinc-500 mt-0.5">
+                      <span>Produced</span><span className="mono-font">{fmtQty(b.outputQty)}{b.outputUnit}</span>
+                    </div>
+                    {b.taggedSales.length > 0 ? (
+                      <div className="mt-1 space-y-0.5 pl-2" style={{ borderLeft: "2px solid #00000010" }}>
+                        {b.taggedSales.map((s) => (
+                          <div key={s.id} className="flex justify-between text-[11px] text-zinc-500">
+                            <span>→ {s.customerName}{s.type === "sample" ? " (sample)" : ""}</span>
+                            <span className="mono-font">{fmtQty(s.qty)}{s.unit}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-[11px] text-zinc-400 mt-0.5 pl-2">No sales tagged to this batch yet</div>
+                    )}
+                    <div className="flex justify-between font-medium mt-0.5 pt-0.5" style={{ borderTop: "1px solid #00000010", color: b.remaining < 0 ? "#D1453B" : "#2E9E5B" }}>
+                      <span>Remaining (est.)</span><span className="mono-font">{fmtQty(b.remaining)}{b.outputUnit}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {itemBatches.length > 5 && (
+                <button onClick={() => setShowAllBatches(!showAllBatches)} className="mt-2 text-[11px]" style={{ color: accent }}>
+                  {showAllBatches ? "Show less" : `Show all ${itemBatches.length} batches`}
+                </button>
+              )}
+              <p className="text-[10px] text-zinc-400 mt-2">Based on batch numbers logged on sales — sales without one aren't attributed to a batch.</p>
             </div>
           )}
 
@@ -3802,7 +3864,7 @@ function AuthenticatedApp() {
             )}
             <div className="space-y-2">
               {visible.map((item) => (
-                <ItemCard key={item.id} item={item} accent={meta.accent} name={session.name} isBoss={isBoss} canViewCosting={canViewCosting} canEnterPrice={canEnterPrice} onUpdate={updateItem} onDelete={deleteItem} />
+                <ItemCard key={item.id} item={item} accent={meta.accent} name={session.name} isBoss={isBoss} canViewCosting={canViewCosting} canEnterPrice={canEnterPrice} batches={batches} sales={sales} onUpdate={updateItem} onDelete={deleteItem} />
               ))}
             </div>
           </>
