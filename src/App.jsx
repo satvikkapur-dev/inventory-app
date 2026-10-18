@@ -1216,7 +1216,7 @@ function MovementRow({ h, showItem, canViewCosting, unit }) {
   );
 }
 
-function ItemCard({ item, accent, name, isBoss, canViewCosting, canEnterPrice, batches, sales, onUpdate, onDelete }) {
+function ItemCard({ item, accent, name, isBoss, canViewCosting, canEnterPrice, batches, sales, brandLabel, onUpdate, onDelete }) {
   const [open, setOpen] = useState(false);
   const [activeAction, setActiveAction] = useState(null);
   const [moveQty, setMoveQty] = useState("");
@@ -1239,14 +1239,27 @@ function ItemCard({ item, accent, name, isBoss, canViewCosting, canEnterPrice, b
   const itemBatches = useMemo(() => {
     if (!isFinishedGood) return [];
     const key = normName(item.name);
-    return (batches || [])
-      .filter((b) => normName(b.productName) === key)
-      .map((b) => {
+    const matching = (batches || []).filter((b) => normName(b.productName) === key);
+
+    // Two production runs can end up sharing a batch number (re-used
+    // numbering, typo) — merge them so a sale tagged to that number is
+    // counted once instead of against each run separately.
+    const groups = new Map();
+    matching.forEach((b) => {
+      const bKey = normName(b.batchNumber);
+      if (!groups.has(bKey)) groups.set(bKey, []);
+      groups.get(bKey).push(b);
+    });
+
+    return Array.from(groups.entries())
+      .map(([bKey, group]) => {
+        const first = group.reduce((a, b) => (new Date(b.createdAt || b.date) < new Date(a.createdAt || a.date) ? b : a));
+        const outputQty = round2(group.reduce((sum, b) => sum + b.outputQty, 0));
         const taggedSales = (sales || []).filter(
-          (s) => normName(s.productName) === key && s.batchNumber && normName(s.batchNumber) === normName(b.batchNumber)
+          (s) => normName(s.productName) === key && s.batchNumber && normName(s.batchNumber) === bKey
         );
         const totalTagged = round2(taggedSales.reduce((sum, s) => sum + s.qty, 0));
-        return { ...b, taggedSales, totalTagged, remaining: round2(b.outputQty - totalTagged) };
+        return { ...first, outputQty, runs: group.length, taggedSales, totalTagged, remaining: round2(outputQty - totalTagged) };
       })
       .sort((a, b) => new Date(b.createdAt || b.date) - new Date(a.createdAt || a.date));
   }, [batches, sales, item.name, isFinishedGood]);
@@ -1382,7 +1395,7 @@ function ItemCard({ item, accent, name, isBoss, canViewCosting, canEnterPrice, b
                       <span className="text-[10px] text-zinc-400">{b.date}</span>
                     </div>
                     <div className="flex justify-between text-zinc-500 mt-0.5">
-                      <span>Produced</span><span className="mono-font">{fmtQty(b.outputQty)}{b.outputUnit}</span>
+                      <span>Produced{b.runs > 1 ? ` (${b.runs} runs combined)` : ""}</span><span className="mono-font">{fmtQty(b.outputQty)}{b.outputUnit}</span>
                     </div>
                     {b.taggedSales.length > 0 ? (
                       <div className="mt-1 space-y-0.5 pl-2" style={{ borderLeft: "2px solid #00000010" }}>
@@ -1407,7 +1420,7 @@ function ItemCard({ item, accent, name, isBoss, canViewCosting, canEnterPrice, b
                   {showAllBatches ? "Show less" : `Show all ${itemBatches.length} batches`}
                 </button>
               )}
-              <p className="text-[10px] text-zinc-400 mt-2">Based on batch numbers logged on sales — sales without one aren't attributed to a batch.</p>
+              <p className="text-[10px] text-zinc-400 mt-2">Based on batch numbers logged on sales — sales without one aren't attributed to a batch.{item.shared ? ` This item is shared across divisions — only batches/sales logged under ${brandLabel} are counted here.` : ""}</p>
             </div>
           )}
 
@@ -2037,13 +2050,15 @@ function SalesForm({ accent, name, finishedGoods, batches, editingSale, onSubmit
   // Suggests batch numbers from production of the selected product, most
   // recent first, so "which batch was this sold from" can be picked rather
   // than remembered — still free text since stock isn't lot-tracked.
+  // Deduped since two production runs can share a batch number.
   const batchOptions = useMemo(() => {
     if (!selectedProduct) return [];
     const key = normName(selectedProduct.name);
-    return (batches || [])
+    const sorted = (batches || [])
       .filter((b) => normName(b.productName) === key)
       .sort((a, b) => new Date(b.createdAt || b.date) - new Date(a.createdAt || a.date))
       .map((b) => b.batchNumber);
+    return Array.from(new Set(sorted));
   }, [batches, selectedProduct]);
 
   const submit = () => {
@@ -2112,13 +2127,15 @@ function SampleIssueForm({ accent, name, finishedGoods, batches, editingSale, on
   const [date, setDate] = useState(editingSale?.date || todayStr());
 
   const selectedProduct = finishedGoods.find((p) => p.id === productId);
+  // Deduped since two production runs can share a batch number.
   const batchOptions = useMemo(() => {
     if (!selectedProduct) return [];
     const key = normName(selectedProduct.name);
-    return (batches || [])
+    const sorted = (batches || [])
       .filter((b) => normName(b.productName) === key)
       .sort((a, b) => new Date(b.createdAt || b.date) - new Date(a.createdAt || a.date))
       .map((b) => b.batchNumber);
+    return Array.from(new Set(sorted));
   }, [batches, selectedProduct]);
 
   const submit = () => {
@@ -3864,7 +3881,7 @@ function AuthenticatedApp() {
             )}
             <div className="space-y-2">
               {visible.map((item) => (
-                <ItemCard key={item.id} item={item} accent={meta.accent} name={session.name} isBoss={isBoss} canViewCosting={canViewCosting} canEnterPrice={canEnterPrice} batches={batches} sales={sales} onUpdate={updateItem} onDelete={deleteItem} />
+                <ItemCard key={item.id} item={item} accent={meta.accent} name={session.name} isBoss={isBoss} canViewCosting={canViewCosting} canEnterPrice={canEnterPrice} batches={batches} sales={sales} brandLabel={meta.label} onUpdate={updateItem} onDelete={deleteItem} />
               ))}
             </div>
           </>
