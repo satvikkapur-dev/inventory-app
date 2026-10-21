@@ -3214,6 +3214,301 @@ function Dashboard({ meta, items, batches, sales, canViewCosting }) {
   );
 }
 
+// Company-wide view across all three divisions, separate from each
+// division's own Dashboard tab. `brandsData` is one entry per division —
+// { key, meta, items, batches, sales } — all already loaded by
+// AuthenticatedApp regardless of which division tab is active.
+function CombinedDashboard({ brandsData, sharedItems, canViewCosting }) {
+  const [profitView, setProfitView] = useState("revenue");
+
+  const allItems = useMemo(
+    () => [...brandsData.flatMap((b) => b.items), ...sharedItems],
+    [brandsData, sharedItems]
+  );
+  const lowStockItems = allItems.filter((i) => i.qty <= i.threshold && !(i.category === "Finished good" && i.qty <= 0));
+  const rawCount = allItems.filter((i) => i.category === "Raw material").length;
+  const packCount = allItems.filter((i) => i.category === "Packaging").length;
+  const fgCount = allItems.filter((i) => i.category === "Finished good").length;
+
+  const divisionForItem = (item) => {
+    const owner = brandsData.find((b) => b.items.some((i) => i.id === item.id));
+    return owner ? owner.meta.label : "Shared";
+  };
+
+  const allBatches = brandsData.flatMap((b) => b.batches);
+  const totalOutput = allBatches.reduce((s, b) => s + (b.outputQty || 0), 0);
+  const totalProdCost = allBatches.reduce((s, b) => s + (b.costing?.totalCost || 0), 0);
+
+  const outputByDivision = brandsData.map((b) => ({
+    key: b.key,
+    label: b.meta.label,
+    accent: b.meta.accent,
+    batchCount: b.batches.length,
+    output: round2(b.batches.reduce((s, x) => s + (x.outputQty || 0), 0)),
+  }));
+
+  const outputByDate = {};
+  allBatches.forEach((b) => {
+    outputByDate[b.date] = (outputByDate[b.date] || 0) + (b.outputQty || 0);
+  });
+  const productionChart = Object.entries(outputByDate)
+    .map(([date, output]) => ({ date, output }))
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  const allSales = brandsData.flatMap((b) => b.sales);
+  const totalRevenue = allSales.reduce((s, x) => s + (x.totalAmount || 0), 0);
+  const totalUnitsSold = allSales.reduce((s, x) => s + (x.qty || 0), 0);
+
+  const revenueByDivision = brandsData
+    .map((b) => ({ name: b.meta.label, value: round2(b.sales.reduce((s, x) => s + (x.totalAmount || 0), 0)), accent: b.meta.accent }))
+    .filter((d) => d.value > 0);
+
+  const revenueByDate = {};
+  allSales.forEach((s) => {
+    revenueByDate[s.date] = (revenueByDate[s.date] || 0) + (s.totalAmount || 0);
+  });
+  const salesChart = Object.entries(revenueByDate)
+    .map(([date, revenue]) => ({ date, revenue }))
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  // Profit is worked out per division — not pooled across all batches/sales
+  // first — so a cost-per-kg derived in one division never gets applied to
+  // a same-named product sold in another.
+  let totalCost = 0;
+  let costDataMissing = false;
+  const profitByDivision = brandsData.map((b) => {
+    const costTotalsByProduct = {};
+    b.batches.forEach((bt) => {
+      if (!bt.productName) return;
+      const key = normName(bt.productName);
+      if (!costTotalsByProduct[key]) costTotalsByProduct[key] = { cost: 0, qty: 0 };
+      costTotalsByProduct[key].cost += bt.costing?.totalCost || 0;
+      costTotalsByProduct[key].qty += bt.outputQty || 0;
+    });
+    const costPerKgByProduct = {};
+    Object.entries(costTotalsByProduct).forEach(([key, v]) => {
+      if (v.qty > 0) costPerKgByProduct[key] = v.cost / v.qty;
+    });
+
+    let divCost = 0;
+    let divRevenue = 0;
+    b.sales.forEach((s) => {
+      const key = normName(s.productName);
+      const costPerKg = costPerKgByProduct[key];
+      if (costPerKg == null) costDataMissing = true;
+      divCost += (costPerKg || 0) * s.qty;
+      divRevenue += s.totalAmount || 0;
+    });
+    totalCost += divCost;
+    return { name: b.meta.label, value: round2(divRevenue - divCost), accent: b.meta.accent };
+  }).filter((d) => d.value !== 0);
+  const totalProfit = totalRevenue - totalCost;
+  const margin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0;
+
+  const byDivisionChart = canViewCosting && profitView === "profit" ? profitByDivision : revenueByDivision;
+  const byDivisionLabel = canViewCosting && profitView === "profit" ? "Profit" : "Revenue";
+
+  const cardStyle = { background: "#FFFFFF", border: "1px solid #00000014" };
+  const shortDate = (d) => {
+    const dt = new Date(d);
+    return dt.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-xl p-4" style={cardStyle}>
+        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-zinc-400 mb-2">
+          <Layers size={12} /> All divisions · Stock overview
+        </div>
+        <div className="grid grid-cols-3 gap-2 text-center">
+          <div>
+            <div className="text-lg font-bold text-zinc-900">{rawCount}</div>
+            <div className="text-[10px] text-zinc-500">Raw materials</div>
+          </div>
+          <div>
+            <div className="text-lg font-bold text-zinc-900">{packCount}</div>
+            <div className="text-[10px] text-zinc-500">Packaging</div>
+          </div>
+          <div>
+            <div className="text-lg font-bold text-zinc-900">{fgCount}</div>
+            <div className="text-[10px] text-zinc-500">Finished goods</div>
+          </div>
+        </div>
+        {lowStockItems.length > 0 && (
+          <div className="mt-3 pt-3" style={{ borderTop: "1px solid #00000010" }}>
+            <div className="flex items-center gap-1.5 text-xs mb-1.5" style={{ color: "#D1453B" }}>
+              <AlertTriangle size={12} /> {lowStockItems.length} item{lowStockItems.length > 1 ? "s" : ""} at or below reorder point
+            </div>
+            {lowStockItems.slice(0, 6).map((i) => (
+              <div key={i.id} className="flex justify-between text-xs text-zinc-600 py-0.5">
+                <span>{i.name} <span className="text-zinc-400">· {divisionForItem(i)}</span></span>
+                <span className="mono-font" style={{ color: "#D1453B" }}>{fmtQty(i.qty)}{i.unit}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-xl p-4" style={cardStyle}>
+        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-zinc-400 mb-2">
+          <Factory size={12} /> All divisions · Production
+        </div>
+        <div className="grid grid-cols-2 gap-2 text-center mb-2">
+          <div>
+            <div className="text-lg font-bold text-zinc-900">{allBatches.length}</div>
+            <div className="text-[10px] text-zinc-500">Batches logged</div>
+          </div>
+          <div>
+            <div className="text-lg font-bold text-zinc-900">{totalOutput.toFixed(0)}</div>
+            <div className="text-[10px] text-zinc-500">Total output (kg)</div>
+          </div>
+        </div>
+        {canViewCosting && (
+          <div className="pb-2 text-center">
+            <div className="text-sm font-semibold text-zinc-800">₹{totalProdCost.toFixed(2)}</div>
+            <div className="text-[10px] text-zinc-500">Total production cost</div>
+          </div>
+        )}
+        <div className="grid grid-cols-3 gap-2 text-center mb-2 pt-2" style={{ borderTop: "1px solid #00000010" }}>
+          {outputByDivision.map((d) => (
+            <div key={d.key}>
+              <div className="text-sm font-bold" style={{ color: d.accent }}>{d.output.toFixed(0)}kg</div>
+              <div className="text-[10px] text-zinc-500">{d.label}</div>
+              <div className="text-[9px] text-zinc-400">{d.batchCount} batch{d.batchCount !== 1 ? "es" : ""}</div>
+            </div>
+          ))}
+        </div>
+        {productionChart.length > 0 ? (
+          <div style={{ width: "100%", height: 160 }}>
+            <ResponsiveContainer>
+              <BarChart data={productionChart} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#00000010" vertical={false} />
+                <XAxis dataKey="date" tickFormatter={shortDate} tick={{ fontSize: 10, fill: "#9CA3AF" }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 10, fill: "#9CA3AF" }} axisLine={false} tickLine={false} width={32} />
+                <Tooltip
+                  labelFormatter={shortDate}
+                  formatter={(v) => [`${v} kg`, "Output"]}
+                  contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #00000014" }}
+                />
+                <Bar dataKey="output" fill={DARK_GREEN} radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        ) : (
+          <p className="text-xs text-zinc-400 text-center py-4">No production data yet to chart.</p>
+        )}
+      </div>
+
+      <div className="rounded-xl p-4" style={cardStyle}>
+        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-zinc-400 mb-2">
+          <TrendingUp size={12} /> All divisions · Sales
+        </div>
+        <div className="grid grid-cols-2 gap-2 text-center mb-2">
+          <div>
+            <div className="text-lg font-bold text-zinc-900">{totalUnitsSold.toFixed(0)}</div>
+            <div className="text-[10px] text-zinc-500">Units sold</div>
+          </div>
+          <div>
+            <div className="text-lg font-bold text-zinc-800">₹{totalRevenue.toFixed(0)}</div>
+            <div className="text-[10px] text-zinc-500">Total revenue</div>
+          </div>
+        </div>
+        {salesChart.length > 0 ? (
+          <div style={{ width: "100%", height: 160 }}>
+            <ResponsiveContainer>
+              <LineChart data={salesChart} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#00000010" vertical={false} />
+                <XAxis dataKey="date" tickFormatter={shortDate} tick={{ fontSize: 10, fill: "#9CA3AF" }} axisLine={false} tickLine={false} />
+                <YAxis tickFormatter={compactINR} tick={{ fontSize: 10, fill: "#9CA3AF" }} axisLine={false} tickLine={false} width={44} />
+                <Tooltip
+                  labelFormatter={shortDate}
+                  formatter={(v) => [`₹${v.toFixed(0)}`, "Revenue"]}
+                  contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #00000014" }}
+                />
+                <Line type="monotone" dataKey="revenue" stroke={DARK_GREEN} strokeWidth={2} dot={{ r: 3 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        ) : (
+          <p className="text-xs text-zinc-400 text-center py-4">No sales data yet to chart.</p>
+        )}
+      </div>
+
+      <div className="rounded-xl p-4" style={cardStyle}>
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-zinc-400">
+            <TrendingUp size={12} /> By division
+          </div>
+          {canViewCosting && (
+            <div className="flex gap-1">
+              {[{ key: "revenue", label: "Revenue" }, { key: "profit", label: "Profit" }].map((o) => (
+                <button
+                  key={o.key}
+                  onClick={() => setProfitView(o.key)}
+                  className="px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors"
+                  style={{
+                    background: profitView === o.key ? DARK_GREEN : "transparent",
+                    color: profitView === o.key ? "#ffffff" : "#8A8F98",
+                    border: profitView === o.key ? "none" : "1px solid #00000014",
+                  }}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        {canViewCosting && (
+          <div className="grid grid-cols-2 gap-2 text-center mb-2">
+            <div>
+              <div className="text-lg font-bold" style={{ color: totalProfit >= 0 ? DARK_GREEN : "#D1453B" }}>₹{totalProfit.toFixed(0)}</div>
+              <div className="text-[10px] text-zinc-500">Total profit</div>
+            </div>
+            <div>
+              <div className="text-lg font-bold text-zinc-900">{margin.toFixed(1)}%</div>
+              <div className="text-[10px] text-zinc-500">Margin</div>
+            </div>
+          </div>
+        )}
+        {canViewCosting && costDataMissing && profitView === "profit" && (
+          <p className="text-[10px] text-zinc-400 text-center mb-2">
+            Profit is estimated from logged production costing — products with no batches logged yet are counted at ₹0 cost.
+          </p>
+        )}
+        {byDivisionChart.length > 0 ? (
+          <>
+            <div style={{ width: "100%", height: 180 }}>
+              <ResponsiveContainer>
+                <PieChart>
+                  <Pie data={byDivisionChart} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={40} outerRadius={70} paddingAngle={2} isAnimationActive={false}>
+                    {byDivisionChart.map((entry) => (
+                      <Cell key={entry.name} fill={entry.accent} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    formatter={(v) => [`₹${v.toFixed(0)}`, byDivisionLabel]}
+                    contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #00000014" }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="flex flex-wrap justify-center gap-x-3 gap-y-1 mt-1">
+              {byDivisionChart.map((entry) => (
+                <div key={entry.name} className="flex items-center gap-1 text-[10px] text-zinc-600">
+                  <span className="inline-block rounded-sm" style={{ width: 8, height: 8, background: entry.accent }} />
+                  {entry.name}
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <p className="text-xs text-zinc-400 text-center py-4">No sales data yet to chart.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function SecretaryWidget({ name, accent }) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState([
@@ -3363,6 +3658,31 @@ function AuthenticatedApp() {
   const { logins, record } = useLoginLog();
   const meta = BRANDS[brand];
 
+  // For the cross-division "All divisions" dashboard — loaded for every
+  // division regardless of which one is active, since that view needs all
+  // three at once rather than whichever brand tab happens to be selected.
+  const urbnfettchInv = useInventory("urbnfettch");
+  const homecareInv = useInventory("homecare");
+  const textilesInv = useInventory("textiles");
+  const urbnfettchProd = useProduction("urbnfettch");
+  const homecareProd = useProduction("homecare");
+  const textilesProd = useProduction("textiles");
+  const urbnfettchSales = useSales("urbnfettch");
+  const homecareSales = useSales("homecare");
+  const textilesSales = useSales("textiles");
+  const allBrandsData = useMemo(
+    () => [
+      { key: "urbnfettch", meta: BRANDS.urbnfettch, items: urbnfettchInv.items, batches: urbnfettchProd.batches, sales: urbnfettchSales.sales },
+      { key: "homecare", meta: BRANDS.homecare, items: homecareInv.items, batches: homecareProd.batches, sales: homecareSales.sales },
+      { key: "textiles", meta: BRANDS.textiles, items: textilesInv.items, batches: textilesProd.batches, sales: textilesSales.sales },
+    ],
+    [
+      urbnfettchInv.items, homecareInv.items, textilesInv.items,
+      urbnfettchProd.batches, homecareProd.batches, textilesProd.batches,
+      urbnfettchSales.sales, homecareSales.sales, textilesSales.sales,
+    ]
+  );
+
   const isBoss = session?.role === "boss";
   const canViewCosting = !!session?.canViewCosting;
   const canEnterPrice = canViewCosting || !!session?.canEnterPrice;
@@ -3376,7 +3696,8 @@ function AuthenticatedApp() {
   const [labResetKey, setLabResetKey] = useState(0);
 
   const TAB_META = {
-    dashboard: { label: "Dashboard", icon: LayoutDashboard },
+    dashboard: { label: meta.label, icon: LayoutDashboard },
+    overview: { label: "All Divisions", icon: Layers },
     items: { label: "Items", icon: Package },
     orders: { label: "Orders", icon: ClipboardList },
     production: { label: "Production", icon: Factory },
@@ -3390,7 +3711,7 @@ function AuthenticatedApp() {
     : isHomecareOrdersOnly
     ? [{ key: "orders", label: "Orders", icon: ClipboardList, tabs: ["orders"] }]
     : [
-        ...(isBoss ? [{ key: "dashboard", label: "Dashboard", icon: LayoutDashboard, tabs: ["dashboard"] }] : []),
+        ...(isBoss ? [{ key: "dashboard", label: "Dashboard", icon: LayoutDashboard, tabs: ["dashboard", "overview"] }] : []),
         { key: "operations", label: "Operations", icon: Layers, tabs: ["orders", "items", "production"] },
         { key: "sales", label: "Sales", icon: ShoppingCart, tabs: ["sales"] },
         ...(canSeeLabTab || samplesOnly ? [{ key: "lab", label: TAB_META.lab.label, icon: TAB_META.lab.icon, tabs: ["lab"] }] : []),
@@ -3405,7 +3726,7 @@ function AuthenticatedApp() {
       setBrand("homecare");
     }
     if (samplesOnly) setLabSubTab("samples");
-    if (tab === "dashboard" && !isBoss) setTab("items");
+    if ((tab === "dashboard" || tab === "overview") && !isBoss) setTab("items");
   }, [session]);
 
   const handleLogin = (user) => {
@@ -3853,6 +4174,8 @@ function AuthenticatedApp() {
           <div className="text-center text-zinc-400 text-sm py-10">Loading…</div>
         ) : tab === "dashboard" && isBoss ? (
           <Dashboard meta={meta} items={combined} batches={batches} sales={sales} canViewCosting={canViewCosting} />
+        ) : tab === "overview" && isBoss ? (
+          <CombinedDashboard brandsData={allBrandsData} sharedItems={sharedItems} canViewCosting={canViewCosting} />
         ) : tab === "items" ? (
           <>
             {showBulkImport && (
