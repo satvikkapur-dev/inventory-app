@@ -3670,6 +3670,15 @@ function AuthenticatedApp() {
   const urbnfettchSales = useSales("urbnfettch");
   const homecareSales = useSales("homecare");
   const textilesSales = useSales("textiles");
+  // Also loaded for all three divisions — needed so renaming a shared item
+  // (see renameProductEverywhere below) can reach every division's orders
+  // and lab records too, not just whichever one is currently active.
+  const urbnfettchOrders = useOrders("urbnfettch");
+  const homecareOrders = useOrders("homecare");
+  const textilesOrders = useOrders("textiles");
+  const urbnfettchLab = useLab("urbnfettch");
+  const homecareLab = useLab("homecare");
+  const textilesLab = useLab("textiles");
   const allBrandsData = useMemo(
     () => [
       { key: "urbnfettch", meta: BRANDS.urbnfettch, items: urbnfettchInv.items, batches: urbnfettchProd.batches, sales: urbnfettchSales.sales },
@@ -3757,9 +3766,63 @@ function AuthenticatedApp() {
     return rows.sort((a, b) => new Date(b.date) - new Date(a.date));
   }, [items, sharedItems]);
 
+  // Renaming an item only touches the item's own name field — every
+  // production batch, sale, order and lab test that already referenced the
+  // old name by text is left untouched otherwise. This cascades the new
+  // name into all of them. A shared item is the same stock seen from every
+  // division, so its rename reaches all three; an unshared item only
+  // touches the division it already lives in.
+  const renameProductEverywhere = (item, oldName, newName) => {
+    const oldKey = normName(oldName);
+    if (!oldKey || oldKey === normName(newName)) return;
+
+    const dataByBrand = {
+      urbnfettch: { prod: urbnfettchProd, sales: urbnfettchSales, orders: urbnfettchOrders, lab: urbnfettchLab },
+      homecare: { prod: homecareProd, sales: homecareSales, orders: homecareOrders, lab: homecareLab },
+      textiles: { prod: textilesProd, sales: textilesSales, orders: textilesOrders, lab: textilesLab },
+    };
+    const brandsToTouch = item.shared ? ["urbnfettch", "homecare", "textiles"] : [brand];
+
+    brandsToTouch.forEach((bKey) => {
+      const d = dataByBrand[bKey];
+
+      const matchesMaterial = (m) => (m.itemId ? m.itemId === item.id : normName(m.itemName) === oldKey);
+      const nextBatches = d.prod.batches.map((b) => {
+        let next = b;
+        if (normName(b.productName) === oldKey) next = { ...next, productName: newName };
+        if (next.materials?.some(matchesMaterial)) {
+          next = { ...next, materials: next.materials.map((m) => (matchesMaterial(m) ? { ...m, itemName: newName } : m)) };
+        }
+        if (next.containerUsed && (next.containerUsed.itemId === item.id || normName(next.containerUsed.itemName) === oldKey)) {
+          next = { ...next, containerUsed: { ...next.containerUsed, itemName: newName } };
+        }
+        return next;
+      });
+      if (nextBatches.some((b, i) => b !== d.prod.batches[i])) d.prod.save(nextBatches);
+
+      const nextSales = d.sales.sales.map((s) =>
+        (s.productId === item.id || normName(s.productName) === oldKey) ? { ...s, productName: newName } : s
+      );
+      if (nextSales.some((s, i) => s !== d.sales.sales[i])) d.sales.save(nextSales);
+
+      const nextOrders = d.orders.orders.map((o) => {
+        if (o.items && o.items.length > 0) {
+          if (!o.items.some((row) => normName(row.productName) === oldKey)) return o;
+          return { ...o, items: o.items.map((row) => (normName(row.productName) === oldKey ? { ...row, productName: newName } : row)) };
+        }
+        return normName(o.productName) === oldKey ? { ...o, productName: newName } : o;
+      });
+      if (nextOrders.some((o, i) => o !== d.orders.orders[i])) d.orders.save(nextOrders);
+
+      const nextTests = d.lab.tests.map((t) => (normName(t.productName) === oldKey ? { ...t, productName: newName } : t));
+      if (nextTests.some((t, i) => t !== d.lab.tests[i])) d.lab.save(nextTests);
+    });
+  };
+
   const updateItem = (updated) => {
     const inBrand = items.some((i) => i.id === updated.id);
     const inShared = sharedItems.some((i) => i.id === updated.id);
+    const previous = (inBrand ? items : sharedItems).find((i) => i.id === updated.id);
 
     if (updated.shared) {
       if (inShared) {
@@ -3775,6 +3838,10 @@ function AuthenticatedApp() {
         saveShared(sharedItems.filter((i) => i.id !== updated.id));
         save([updated, ...items]);
       }
+    }
+
+    if (previous && previous.name !== updated.name) {
+      renameProductEverywhere(updated, previous.name, updated.name);
     }
   };
 
